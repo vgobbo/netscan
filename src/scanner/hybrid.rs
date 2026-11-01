@@ -1,7 +1,7 @@
 use crate::model::Device;
+use crate::scanner::NetworkScanner;
 use crate::scanner::native::NativeScanner;
 use crate::scanner::nmap::NmapScanner;
-use crate::scanner::NetworkScanner;
 use anyhow::Result;
 use async_trait::async_trait;
 use ipnetwork::IpNetwork;
@@ -32,10 +32,8 @@ impl NetworkScanner for HybridScanner {
         let native_devices = self.native.scan_network(targets).await?;
 
         // 2. If Nmap is available, run Nmap to discover any hosts that drop ICMP/standard TCP
-        let mut device_map: HashMap<IpAddr, Device> = native_devices
-            .into_iter()
-            .map(|d| (d.ip, d))
-            .collect();
+        let mut device_map: HashMap<IpAddr, Device> =
+            native_devices.into_iter().map(|d| (d.ip, d)).collect();
 
         if NmapScanner::is_available().await {
             info!("Enriching host discovery with Nmap backend...");
@@ -58,7 +56,7 @@ impl NetworkScanner for HybridScanner {
         }
 
         let mut all_devices: Vec<Device> = device_map.into_values().collect();
-        all_devices.sort_by(|a, b| a.ip.cmp(&b.ip));
+        all_devices.sort_by_key(|a| a.ip);
         Ok(all_devices)
     }
 

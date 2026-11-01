@@ -9,11 +9,16 @@ impl MarkdownSummaryGenerator {
     pub fn generate(topology: &NetworkTopology) -> String {
         let mut doc = String::new();
 
-        let date_str = topology.timestamp.format("%B %d, %Y at %H:%M:%S %Z").to_string();
+        let date_str = topology
+            .timestamp
+            .format("%B %d, %Y at %H:%M:%S %Z")
+            .to_string();
 
         doc.push_str("# Network Topology and Device Inventory Report\n\n");
         doc.push_str(&format!("**Scan Execution Time:** {}\n", date_str));
-        doc.push_str("**Scanner Engine:** `netscan` (Idiomatic Asynchronous Rust with Tokio & Reqwest)\n");
+        doc.push_str(
+            "**Scanner Engine:** `netscan` (Idiomatic Asynchronous Rust with Tokio & Reqwest)\n",
+        );
         doc.push_str("**Total Devices Discovered:** ");
         doc.push_str(&format!("{}\n\n", topology.devices.len()));
         doc.push_str("---\n\n");
@@ -55,12 +60,20 @@ impl MarkdownSummaryGenerator {
             ));
         }
         doc.push_str("\n### Upstream Hop-by-Hop Trace\n\n");
-        doc.push_str("| Hop | IP Address | Round-Trip Latency | Network Label | Role / Function |\n");
+        doc.push_str(
+            "| Hop | IP Address | Round-Trip Latency | Network Label | Role / Function |\n",
+        );
         doc.push_str("|:---:|---|:---:|---|---|\n");
 
         for hop in &topology.upstream.hops {
-            let ip_str = hop.ip.map(|i| i.to_string()).unwrap_or_else(|| "*.*.*.*".to_string());
-            let rtt_str = hop.rtt_ms.map(|r| format!("{:.2} ms", r)).unwrap_or_else(|| "N/A".to_string());
+            let ip_str = hop
+                .ip
+                .map(|i| i.to_string())
+                .unwrap_or_else(|| "*.*.*.*".to_string());
+            let rtt_str = hop
+                .rtt_ms
+                .map(|r| format!("{:.2} ms", r))
+                .unwrap_or_else(|| "N/A".to_string());
             doc.push_str(&format!(
                 "| **{}** | `{}` | {} | {} | {} |\n",
                 hop.hop_number, ip_str, rtt_str, hop.network_label, hop.description
@@ -130,11 +143,17 @@ impl MarkdownSummaryGenerator {
         doc.push_str("|---|:---:|---|\n");
 
         for cat in categories {
-            let matching: Vec<&crate::model::Device> =
-                topology.devices.iter().filter(|d| d.device_type == cat).collect();
+            let matching: Vec<&crate::model::Device> = topology
+                .devices
+                .iter()
+                .filter(|d| d.device_type == cat)
+                .collect();
             if !matching.is_empty() {
-                let sample_names: Vec<String> =
-                    matching.iter().take(3).map(|d| d.device_name.clone()).collect();
+                let sample_names: Vec<String> = matching
+                    .iter()
+                    .take(3)
+                    .map(|d| d.device_name.clone())
+                    .collect();
                 doc.push_str(&format!(
                     "| **{}** | {} | {} |\n",
                     cat,

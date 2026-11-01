@@ -35,15 +35,15 @@ impl UpstreamTracer {
 
         // 3. Identify and document intermediate subnets
         for hop in &path.hops {
-            if let Some(ip) = hop.ip {
-                if let IpAddr::V4(v4) = ip {
-                    let octets = v4.octets();
-                    // Detect private intermediate subnets (192.168.0.0/24, 10.0.0.0/8, etc.)
-                    if octets[0] == 192 && octets[1] == 168 && octets[2] != 1 {
-                        let subnet = format!("192.168.{}.0/24", octets[2]);
-                        if !path.intermediate_subnets.contains(&subnet) {
-                            path.intermediate_subnets.push(subnet);
-                        }
+            if let Some(ip) = hop.ip
+                && let IpAddr::V4(v4) = ip
+            {
+                let octets = v4.octets();
+                // Detect private intermediate subnets (192.168.0.0/24, 10.0.0.0/8, etc.)
+                if octets[0] == 192 && octets[1] == 168 && octets[2] != 1 {
+                    let subnet = format!("192.168.{}.0/24", octets[2]);
+                    if !path.intermediate_subnets.contains(&subnet) {
+                        path.intermediate_subnets.push(subnet);
                     }
                 }
             }
@@ -61,10 +61,10 @@ impl UpstreamTracer {
     async fn fetch_public_ip_info(&self, path: &mut UpstreamPath) {
         if let Ok(resp) = self.client.get("https://ipinfo.io/json").send().await {
             if let Ok(json) = resp.json::<serde_json::Value>().await {
-                if let Some(ip_str) = json.get("ip").and_then(|v| v.as_str()) {
-                    if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                        path.public_ip = Some(ip);
-                    }
+                if let Some(ip_str) = json.get("ip").and_then(|v| v.as_str())
+                    && let Ok(ip) = ip_str.parse::<IpAddr>()
+                {
+                    path.public_ip = Some(ip);
                 }
                 if let Some(hostname) = json.get("hostname").and_then(|v| v.as_str()) {
                     path.reverse_dns = Some(hostname.to_string());
@@ -73,12 +73,11 @@ impl UpstreamTracer {
                     path.carrier_as = Some(org.to_string());
                 }
             }
-        } else if let Ok(resp) = self.client.get("https://api.ipify.org").send().await {
-            if let Ok(text) = resp.text().await {
-                if let Ok(ip) = text.trim().parse::<IpAddr>() {
-                    path.public_ip = Some(ip);
-                }
-            }
+        } else if let Ok(resp) = self.client.get("https://api.ipify.org").send().await
+            && let Ok(text) = resp.text().await
+            && let Ok(ip) = text.trim().parse::<IpAddr>()
+        {
+            path.public_ip = Some(ip);
         }
     }
 

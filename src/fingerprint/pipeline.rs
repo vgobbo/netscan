@@ -63,10 +63,10 @@ impl FingerprintPipeline {
     /// Enriches a single device using MAC, HTTP, Cast, and HomeWizard probes.
     pub async fn enrich_device(device: &mut Device, client: &Client) {
         // 1. MAC Vendor Lookup
-        if let Some(mac) = &device.mac {
-            if let Some(vendor) = OuiMatcher::lookup(mac) {
-                device.vendor = Some(vendor);
-            }
+        if let Some(mac) = &device.mac
+            && let Some(vendor) = OuiMatcher::lookup(mac)
+        {
+            device.vendor = Some(vendor);
         }
 
         // 2. HTTP / HTTPS Probing

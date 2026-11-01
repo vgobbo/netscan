@@ -29,12 +29,12 @@ impl ArpReader {
             for line in reader.lines().map_while(Result::ok).skip(1) {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 // Format: IP address | HW type | Flags | HW address | Mask | Device
-                if parts.len() >= 6 {
-                    if let Ok(ip) = parts[0].parse::<IpAddr>() {
-                        let mac = parts[3].to_lowercase();
-                        if mac != "00:00:00:00:00:00" && mac.contains(':') {
-                            map.insert(ip, mac);
-                        }
+                if parts.len() >= 6
+                    && let Ok(ip) = parts[0].parse::<IpAddr>()
+                {
+                    let mac = parts[3].to_lowercase();
+                    if mac != "00:00:00:00:00:00" && mac.contains(':') {
+                        map.insert(ip, mac);
                     }
                 }
             }
@@ -42,23 +42,20 @@ impl ArpReader {
 
         if map.is_empty() {
             // 2. Fall back to `ip -j neigh`
-            if let Ok(output) = Command::new("ip").args(["-j", "neigh"]).output() {
-                if output.status.success() {
-                    if let Ok(json_str) = String::from_utf8(output.stdout) {
-                        if let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
-                            for entry in entries {
-                                if let (Some(dst), Some(lladdr)) = (
-                                    entry.get("dst").and_then(|v| v.as_str()),
-                                    entry.get("lladdr").and_then(|v| v.as_str()),
-                                ) {
-                                    if let Ok(ip) = dst.parse::<IpAddr>() {
-                                        let mac = lladdr.to_lowercase();
-                                        if mac.contains(':') && mac != "00:00:00:00:00:00" {
-                                            map.insert(ip, mac);
-                                        }
-                                    }
-                                }
-                            }
+            if let Ok(output) = Command::new("ip").args(["-j", "neigh"]).output()
+                && output.status.success()
+                && let Ok(json_str) = String::from_utf8(output.stdout)
+                && let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str)
+            {
+                for entry in entries {
+                    if let (Some(dst), Some(lladdr)) = (
+                        entry.get("dst").and_then(|v| v.as_str()),
+                        entry.get("lladdr").and_then(|v| v.as_str()),
+                    ) && let Ok(ip) = dst.parse::<IpAddr>()
+                    {
+                        let mac = lladdr.to_lowercase();
+                        if mac.contains(':') && mac != "00:00:00:00:00:00" {
+                            map.insert(ip, mac);
                         }
                     }
                 }
@@ -66,24 +63,22 @@ impl ArpReader {
         }
 
         // 3. Populate local machine's own interfaces (local IPs are not in kernel ARP table)
-        if let Ok(output) = Command::new("ip").args(["-j", "addr"]).output() {
-            if output.status.success() {
-                if let Ok(json_str) = String::from_utf8(output.stdout) {
-                    if let Ok(ifaces) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
-                        for iface in ifaces {
-                            if let Some(mac) = iface.get("address").and_then(|v| v.as_str()) {
-                                if mac.contains(':') && mac != "00:00:00:00:00:00" {
-                                    if let Some(addrs) = iface.get("addr_info").and_then(|v| v.as_array()) {
-                                        for addr in addrs {
-                                            if let Some(local_ip_str) = addr.get("local").and_then(|v| v.as_str()) {
-                                                if let Ok(ip) = local_ip_str.parse::<IpAddr>() {
-                                                    map.entry(ip).or_insert_with(|| mac.to_lowercase());
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+        if let Ok(output) = Command::new("ip").args(["-j", "addr"]).output()
+            && output.status.success()
+            && let Ok(json_str) = String::from_utf8(output.stdout)
+            && let Ok(ifaces) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str)
+        {
+            for iface in ifaces {
+                if let Some(mac) = iface.get("address").and_then(|v| v.as_str())
+                    && mac.contains(':')
+                    && mac != "00:00:00:00:00:00"
+                    && let Some(addrs) = iface.get("addr_info").and_then(|v| v.as_array())
+                {
+                    for addr in addrs {
+                        if let Some(local_ip_str) = addr.get("local").and_then(|v| v.as_str())
+                            && let Ok(ip) = local_ip_str.parse::<IpAddr>()
+                        {
+                            map.entry(ip).or_insert_with(|| mac.to_lowercase());
                         }
                     }
                 }

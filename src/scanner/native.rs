@@ -1,6 +1,6 @@
 use crate::model::Device;
 use crate::net::ArpReader;
-use crate::scanner::{NetworkScanner, DEFAULT_PROBE_PORTS};
+use crate::scanner::{DEFAULT_PROBE_PORTS, NetworkScanner};
 use anyhow::Result;
 use async_trait::async_trait;
 use ipnetwork::IpNetwork;
@@ -44,10 +44,10 @@ impl NativeScanner {
     /// Tests if a TCP port is open on the target host.
     async fn test_tcp_port(ip: IpAddr, port: u16, timeout_duration: Duration) -> bool {
         let addr = SocketAddr::new(ip, port);
-        match timeout(timeout_duration, TcpStream::connect(addr)).await {
-            Ok(Ok(_)) => true,
-            _ => false,
-        }
+        matches!(
+            timeout(timeout_duration, TcpStream::connect(addr)).await,
+            Ok(Ok(_))
+        )
     }
 
     /// Resolves the hostname for a given IP address via getent hosts.
@@ -127,7 +127,10 @@ impl NetworkScanner for NativeScanner {
             }
         }
 
-        info!("Discovered {} active hosts. Reading ARP table and fingerprinting ports...", alive_hosts.len());
+        info!(
+            "Discovered {} active hosts. Reading ARP table and fingerprinting ports...",
+            alive_hosts.len()
+        );
 
         // Refresh ARP table to capture hardware MAC addresses
         let arp_table = ArpReader::get_table();
@@ -169,7 +172,7 @@ impl NetworkScanner for NativeScanner {
         }
 
         // Sort devices by IP address
-        devices.sort_by(|a, b| a.ip.cmp(&b.ip));
+        devices.sort_by_key(|a| a.ip);
         Ok(devices)
     }
 

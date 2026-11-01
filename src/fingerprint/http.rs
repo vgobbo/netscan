@@ -55,19 +55,19 @@ impl HttpProber {
                 };
 
                 // Check Server header
-                if let Some(srv) = resp.headers().get(reqwest::header::SERVER) {
-                    if let Ok(s) = srv.to_str() {
-                        if fp.server.is_none() {
-                            fp.server = Some(s.to_string());
-                        }
+                if let Some(srv) = resp.headers().get(reqwest::header::SERVER)
+                    && let Ok(s) = srv.to_str()
+                {
+                    if fp.server.is_none() {
+                        fp.server = Some(s.to_string());
+                    }
 
-                        if let Some(caps) = yamaha_re.captures(s) {
-                            fp.is_yamaha = Some(caps[1].to_string());
-                        }
+                    if let Some(caps) = yamaha_re.captures(s) {
+                        fp.is_yamaha = Some(caps[1].to_string());
+                    }
 
-                        if s.contains("Mongoose") {
-                            fp.is_mongoose_elinter = true;
-                        }
+                    if s.contains("Mongoose") {
+                        fp.is_mongoose_elinter = true;
                     }
                 }
 
@@ -80,31 +80,32 @@ impl HttpProber {
                     };
 
                     // Title tag
-                    if fp.title.is_none() {
-                        if let Some(caps) = title_re.captures(truncated) {
-                            let title = caps[1].trim().to_string();
-                            if !title.is_empty() {
-                                fp.title = Some(title);
-                            }
+                    if fp.title.is_none()
+                        && let Some(caps) = title_re.captures(truncated)
+                    {
+                        let title = caps[1].trim().to_string();
+                        if !title.is_empty() {
+                            fp.title = Some(title);
                         }
                     }
 
                     // UniFi OS manifest
-                    if let Some(caps) = unifi_re.captures(truncated) {
-                        if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&caps[1]) {
-                            if let Some(short_name) = manifest
-                                .get("model")
-                                .and_then(|m| m.get("shortName"))
-                                .and_then(|s| s.as_str())
-                            {
-                                fp.unifi_model = Some(short_name.to_string());
-                            }
-                        }
+                    if let Some(caps) = unifi_re.captures(truncated)
+                        && let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&caps[1])
+                        && let Some(short_name) = manifest
+                            .get("model")
+                            .and_then(|m| m.get("shortName"))
+                            .and_then(|s| s.as_str())
+                    {
+                        fp.unifi_model = Some(short_name.to_string());
                     }
 
                     // ASUSWRT detection
-                    if truncated.contains("Main_Login.asp") || truncated.contains("router.asus.com") {
-                        if truncated.contains("isAMeshRE = ('1' == '1')") || truncated.contains("AiMesh router detect") {
+                    if truncated.contains("Main_Login.asp") || truncated.contains("router.asus.com")
+                    {
+                        if truncated.contains("isAMeshRE = ('1' == '1')")
+                            || truncated.contains("AiMesh router detect")
+                        {
                             fp.asus_mode = Some("AiMesh Satellite Node".to_string());
                         } else {
                             fp.asus_mode = Some("AiMesh Master / AP".to_string());
@@ -128,12 +129,15 @@ impl HttpProber {
                 // Check Prometheus node_exporter metrics
                 if port == 9100 {
                     let metrics_url = format!("http://{}:9100/metrics", ip);
-                    if let Ok(m_resp) = client.get(&metrics_url).timeout(Duration::from_millis(1000)).send().await {
-                        if let Ok(m_text) = m_resp.text().await {
-                            if m_text.contains("node_os_info") || m_text.contains("node_uname_info") {
-                                fp.is_prometheus = true;
-                            }
-                        }
+                    if let Ok(m_resp) = client
+                        .get(&metrics_url)
+                        .timeout(Duration::from_millis(1000))
+                        .send()
+                        .await
+                        && let Ok(m_text) = m_resp.text().await
+                        && (m_text.contains("node_os_info") || m_text.contains("node_uname_info"))
+                    {
+                        fp.is_prometheus = true;
                     }
                 }
             }

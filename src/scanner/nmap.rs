@@ -46,7 +46,8 @@ impl NetworkScanner for NmapScanner {
         let output = cmd.output().await.context("Failed to run nmap")?;
         let text = String::from_utf8_lossy(&output.stdout);
 
-        let report_re = Regex::new(r"Nmap scan report for (?:([^\s()]+)\s+\()?([0-9.]+)\)?").unwrap();
+        let report_re =
+            Regex::new(r"Nmap scan report for (?:([^\s()]+)\s+\()?([0-9.]+)\)?").unwrap();
         let mac_re = Regex::new(r"MAC Address: ([0-9A-Fa-f:]{17})\s*(?:\((.*?)\))?").unwrap();
 
         let mut discovered = Vec::new();
@@ -102,10 +103,10 @@ impl NetworkScanner for NmapScanner {
         // Fill any missing MAC addresses from ARP table
         let arp = ArpReader::get_table();
         for dev in &mut discovered {
-            if dev.mac.is_none() {
-                if let Some(m) = arp.get(&dev.ip) {
-                    dev.mac = Some(m.clone());
-                }
+            if dev.mac.is_none()
+                && let Some(m) = arp.get(&dev.ip)
+            {
+                dev.mac = Some(m.clone());
             }
         }
 
@@ -124,22 +125,19 @@ impl NetworkScanner for NmapScanner {
                 for line in port_text.lines() {
                     if let Some(caps) = report_re.captures(line) {
                         cur_ip = caps.get(2).and_then(|m| m.as_str().parse::<IpAddr>().ok());
-                    } else if let Some(caps) = port_re.captures(line) {
-                        if let (Some(ip), Some(p_str)) = (cur_ip, caps.get(1)) {
-                            if let Ok(p) = p_str.as_str().parse::<u16>() {
-                                if let Some(dev) = discovered.iter_mut().find(|d| d.ip == ip) {
-                                    if !dev.open_ports.contains(&p) {
-                                        dev.open_ports.push(p);
-                                    }
-                                }
-                            }
-                        }
+                    } else if let Some(caps) = port_re.captures(line)
+                        && let (Some(ip), Some(p_str)) = (cur_ip, caps.get(1))
+                        && let Ok(p) = p_str.as_str().parse::<u16>()
+                        && let Some(dev) = discovered.iter_mut().find(|d| d.ip == ip)
+                        && !dev.open_ports.contains(&p)
+                    {
+                        dev.open_ports.push(p);
                     }
                 }
             }
         }
 
-        discovered.sort_by(|a, b| a.ip.cmp(&b.ip));
+        discovered.sort_by_key(|a| a.ip);
         Ok(discovered)
     }
 
@@ -152,10 +150,10 @@ impl NetworkScanner for NmapScanner {
         let port_re = Regex::new(r"^(\d+)/tcp\s+open").unwrap();
         let mut open = Vec::new();
         for line in text.lines() {
-            if let Some(caps) = port_re.captures(line) {
-                if let Ok(p) = caps[1].parse::<u16>() {
-                    open.push(p);
-                }
+            if let Some(caps) = port_re.captures(line)
+                && let Ok(p) = caps[1].parse::<u16>()
+            {
+                open.push(p);
             }
         }
         Ok(open)

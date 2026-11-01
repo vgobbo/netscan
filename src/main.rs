@@ -161,10 +161,10 @@ fn resolve_targets(cli_targets: &[String]) -> Result<Vec<IpNetwork>> {
         detected.push(base_net);
 
         // 2. Auto-include intermediate upstream gateway network (e.g. 192.168.0.0/24)
-        if primary.network.network().to_string() == "192.168.1.0" {
-            if let Ok(interconnect) = "192.168.0.0/24".parse::<IpNetwork>() {
-                detected.push(interconnect);
-            }
+        if primary.network.network().to_string() == "192.168.1.0"
+            && let Ok(interconnect) = "192.168.0.0/24".parse::<IpNetwork>()
+        {
+            detected.push(interconnect);
         }
     }
 

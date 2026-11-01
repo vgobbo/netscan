@@ -115,24 +115,24 @@ impl OuiMatcher {
             "/usr/share/nmap/nmap-mac-prefixes",
             "/var/lib/misc/nmap-mac-prefixes",
         ] {
-            if Path::new(path).exists() {
-                if let Ok(file) = File::open(path) {
-                    let reader = BufReader::new(file);
-                    for line in reader.lines().map_while(Result::ok) {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 2 && parts[0].eq_ignore_ascii_case(&clean) {
-                            return Some(parts[1..].join(" "));
-                        }
+            if Path::new(path).exists()
+                && let Ok(file) = File::open(path)
+            {
+                let reader = BufReader::new(file);
+                for line in reader.lines().map_while(Result::ok) {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 && parts[0].eq_ignore_ascii_case(&clean) {
+                        return Some(parts[1..].join(" "));
                     }
                 }
             }
         }
 
         // Check if locally administered address (randomized MAC)
-        if let Ok(first_byte) = u8::from_str_radix(&clean[0..2], 16) {
-            if (first_byte & 0x02) != 0 {
-                return Some("Locally Administered / Randomized MAC".to_string());
-            }
+        if let Ok(first_byte) = u8::from_str_radix(&clean[0..2], 16)
+            && (first_byte & 0x02) != 0
+        {
+            return Some("Locally Administered / Randomized MAC".to_string());
         }
 
         None

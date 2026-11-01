@@ -22,14 +22,18 @@ impl MermaidGenerator {
 
         // 2. Intermediate WAN Interconnect Subnet (Between Gateway and Internet)
         out.push_str("    %% Intermediate WAN Interconnect Subnet (Between Gateway & Internet)\n");
-        out.push_str("    subgraph Interconnect_Zone [\"WAN Interconnect Network (192.168.0.0/24)\"]\n");
+        out.push_str(
+            "    subgraph Interconnect_Zone [\"WAN Interconnect Network (192.168.0.0/24)\"]\n",
+        );
         out.push_str("        ZyxelModem[\"ISP Modem / Router (Zyxel Gateway)\"]\n");
         out.push_str("    end\n\n");
 
         // 3. Core Routing Gateway
         out.push_str("    %% Primary Gateway & Firewall\n");
         out.push_str("    subgraph Core_Routing [\"Security & Routing\"]\n");
-        out.push_str("        UniFiGateway[\"Security Gateway & Controller (UniFi Cloud Gateway Max)\"]\n");
+        out.push_str(
+            "        UniFiGateway[\"Security Gateway & Controller (UniFi Cloud Gateway Max)\"]\n",
+        );
         out.push_str("    end\n\n");
 
         // 4. Distribution Infrastructure (Switches & APs)
@@ -61,7 +65,10 @@ impl MermaidGenerator {
             if is_core_infra(dev) {
                 continue;
             }
-            grouped.entry(dev.device_type.subgraph_name()).or_default().push(dev);
+            grouped
+                .entry(dev.device_type.subgraph_name())
+                .or_default()
+                .push(dev);
         }
 
         for (subgraph_header, devs) in grouped {
