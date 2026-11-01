@@ -3,7 +3,7 @@ use clap::Parser;
 use ipnetwork::IpNetwork;
 use std::fs;
 use std::path::Path;
-use tracing::Level;
+use tracing::{Level, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 mod cli;
@@ -47,70 +47,63 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
 
-    println!("============================================================");
-    println!("       netscan - Automated Network Topology Mapper          ");
-    println!("============================================================");
+    info!(
+        "Starting netscan v{} - Automated Network Topology Mapper",
+        env!("CARGO_PKG_VERSION")
+    );
 
     // 2. Resolve Target Networks
     let targets = resolve_targets(&args.target)?;
-    println!("[+] Target Networks to Scan:");
-    for t in &targets {
-        println!("    - {}", t);
-    }
-    println!();
+    let target_strs: Vec<String> = targets.iter().map(|t| t.to_string()).collect();
+    info!("Target networks to scan: {}", target_strs.join(", "));
 
     // 3. Initialize Scanner Engine
     let scanner: Box<dyn NetworkScanner> = match args.backend {
         BackendChoice::Native => {
-            println!("[+] Scanner Backend: Native Tokio Async Engine");
+            info!("Scanner backend: Native Tokio Async Engine");
             Box::new(NativeScanner::new(args.concurrency, args.timeout_ms))
         }
         BackendChoice::Nmap => {
-            println!("[+] Scanner Backend: Nmap Backend");
+            info!("Scanner backend: Nmap Backend");
             Box::new(NmapScanner::new(args.timeout_ms))
         }
         BackendChoice::Hybrid => {
-            println!("[+] Scanner Backend: Hybrid (Native Async + Nmap Enrichment)");
+            info!("Scanner backend: Hybrid (Native Async + Nmap Enrichment)");
             Box::new(HybridScanner::new(args.concurrency, args.timeout_ms))
         }
     };
 
     // 4. Execute Network Scan
-    println!("[*] Discovering and probing active hosts...");
     let mut devices = scanner.scan_network(&targets).await?;
-    println!("[+] Discovered {} active host(s).", devices.len());
-    println!();
+    info!("Discovered {} active host(s)", devices.len());
 
     // 5. Device Fingerprinting Pipeline
-    println!("[*] Fingerprinting devices via HTTP, Google Cast, and MAC OUI...");
+    info!("Fingerprinting devices via HTTP, Google Cast, and MAC OUI...");
     let pipeline = FingerprintPipeline::new(args.concurrency);
     pipeline.enrich_all(&mut devices).await;
-    println!("[+] Fingerprinting completed.");
-    println!();
+    info!("Device fingerprinting completed");
 
     // 6. Upstream Path Trace (Between Gateway and Internet)
     let upstream_path = if !args.skip_upstream {
-        println!("[*] Tracing upstream network hops between gateway and Internet...");
         let tracer = UpstreamTracer::new();
         match tracer.trace().await {
             Ok(p) => {
-                println!(
-                    "[+] Upstream path identified: Public IP {:?}, {} intermediate hop(s).",
+                info!(
+                    "Upstream path identified: Public IP {:?}, {} intermediate hop(s)",
                     p.public_ip,
                     p.hops.len()
                 );
                 p
             }
             Err(e) => {
-                eprintln!("[!] Warning: Could not trace upstream hops: {}", e);
+                warn!("Could not trace upstream hops: {}", e);
                 Default::default()
             }
         }
     } else {
-        println!("[*] Skipping upstream traceroute (--skip-upstream set).");
+        info!("Skipping upstream traceroute (--skip-upstream set)");
         Default::default()
     };
-    println!();
 
     // 7. Build Topology Model
     let local_subnets = targets.iter().map(|t| t.to_string()).collect();
@@ -119,7 +112,7 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
     topology.upstream = upstream_path;
 
     // 8. Generate Reports
-    println!("[*] Generating network diagram and documentation...");
+    info!("Generating network diagram and documentation...");
     let mermaid_diagram = MermaidGenerator::generate(&topology);
     let markdown_summary = MarkdownSummaryGenerator::generate(&topology);
 
@@ -138,11 +131,9 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
     fs::write(&mmd_path, &mermaid_diagram)
         .context(format!("Failed to write mermaid diagram to {:?}", mmd_path))?;
 
-    println!("============================================================");
-    println!("[+] Scan Complete! Artifacts generated successfully:");
-    println!("    - Markdown Report: {}", md_path.display());
-    println!("    - Mermaid Diagram: {}", mmd_path.display());
-    println!("============================================================");
+    info!("Scan complete! Artifacts generated successfully:");
+    info!("  - Markdown report: {}", md_path.display());
+    info!("  - Mermaid diagram: {}", mmd_path.display());
 
     Ok(())
 }
