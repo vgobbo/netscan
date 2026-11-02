@@ -64,7 +64,7 @@ cargo run -- scan
 
 ### 4. Custom Output Paths
 ```bash
-./target/release/netscan scan --output-dir ./reports --output-md topology.md --output-mmd diagram.mmd
+./target/release/netscan scan --output-dir ./reports --output-md topology.md --output-mmd diagram.mmd --output-json topology.json
 ```
 
 ### 5. View Full Help Options
@@ -79,3 +79,4 @@ cargo run -- scan
 Running `netscan scan` generates:
 1. [`network_summary.md`](file:///home/vgobbo/topology/network_summary.md): Markdown report containing executive summary, upstream network path, embedded Mermaid diagram, and complete device inventory table.
 2. [`network_diagram.mmd`](file:///home/vgobbo/topology/network_diagram.mmd): Standalone Mermaid diagram showing network zones, device types, and device names (with IP and MAC addresses omitted).
+3. [`network_topology.json`](file:///home/vgobbo/topology/network_topology.json): Complete machine-readable JSON representation of the network topology, discovered devices, open ports, fingerprinted attributes, and upstream hops.

@@ -51,6 +51,10 @@ pub struct ScanArgs {
     #[arg(long, default_value = "network_diagram.mmd")]
     pub output_mmd: String,
 
+    /// JSON network topology data file name
+    #[arg(long, default_value = "network_topology.json")]
+    pub output_json: String,
+
     /// Skip tracing upstream hops to the public Internet
     #[arg(long)]
     pub skip_upstream: bool,

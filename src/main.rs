@@ -19,7 +19,7 @@ use cli::{BackendChoice, Cli, Commands, ScanArgs};
 use fingerprint::FingerprintPipeline;
 use model::NetworkTopology;
 use net::InterfaceDetector;
-use report::{MarkdownSummaryGenerator, MermaidGenerator};
+use report::{JsonGenerator, MarkdownSummaryGenerator, MermaidGenerator};
 use scanner::{HybridScanner, NativeScanner, NetworkScanner, NmapScanner};
 use upstream::UpstreamTracer;
 
@@ -144,9 +144,10 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
     topology.upstream = upstream_path;
 
     // 10. Generate Reports Dynamically from the Abstract Topology Model
-    info!("Generating network diagram and documentation...");
+    info!("Generating network diagram, documentation, and JSON export...");
     let mermaid_diagram = MermaidGenerator::generate(&topology);
     let markdown_summary = MarkdownSummaryGenerator::generate(&topology);
+    let json_export = JsonGenerator::generate(&topology)?;
 
     // 11. Write Output Files
     let out_dir = Path::new(&args.output_dir);
@@ -157,15 +158,21 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
 
     let md_path = out_dir.join(&args.output_md);
     let mmd_path = out_dir.join(&args.output_mmd);
+    let json_path = out_dir.join(&args.output_json);
 
     fs::write(&md_path, &markdown_summary)
         .context(format!("Failed to write markdown report to {:?}", md_path))?;
     fs::write(&mmd_path, &mermaid_diagram)
         .context(format!("Failed to write mermaid diagram to {:?}", mmd_path))?;
+    fs::write(&json_path, &json_export).context(format!(
+        "Failed to write JSON topology data to {:?}",
+        json_path
+    ))?;
 
     info!("Scan complete! Artifacts generated successfully:");
     info!("  - Markdown report: {}", md_path.display());
     info!("  - Mermaid diagram: {}", mmd_path.display());
+    info!("  - JSON data:       {}", json_path.display());
 
     Ok(())
 }
