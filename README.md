@@ -32,7 +32,7 @@ cargo build
 cargo build --release
 ```
 
-The compiled binaries will be available at [`target/debug/netscan`](file:///home/vgobbo/topology/target/debug/netscan) and [`target/release/netscan`](file:///home/vgobbo/topology/target/release/netscan).
+The compiled binaries will be available at `target/debug/netscan` and `target/release/netscan`.
 
 ---
 
@@ -77,6 +77,6 @@ cargo run -- scan
 ## Output Artifacts
 
 Running `netscan scan` generates:
-1. [`network_summary.md`](file:///home/vgobbo/topology/network_summary.md): Markdown report containing executive summary, upstream network path, embedded Mermaid diagram, and complete device inventory table.
-2. [`network_diagram.mmd`](file:///home/vgobbo/topology/network_diagram.mmd): Standalone Mermaid diagram showing network zones, device types, and device names (with IP and MAC addresses omitted).
-3. [`network_topology.json`](file:///home/vgobbo/topology/network_topology.json): Complete machine-readable JSON representation of the network topology, discovered devices, open ports, fingerprinted attributes, and upstream hops.
+1. `network_summary.md`: Markdown report containing executive summary, upstream network path, embedded Mermaid diagram, and complete device inventory table.
+2. `network_diagram.mmd`: Standalone Mermaid diagram showing network zones, device types, and device names (with IP and MAC addresses omitted).
+3. `network_topology.json`: Complete machine-readable JSON representation of the network topology, discovered devices, open ports, fingerprinted attributes, and upstream hops.
