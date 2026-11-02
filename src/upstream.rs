@@ -1,5 +1,6 @@
 use crate::model::{UpstreamHop, UpstreamPath};
 use anyhow::Result;
+use ipnetwork::IpNetwork;
 use regex::Regex;
 use reqwest::Client;
 use std::net::IpAddr;
@@ -22,32 +23,21 @@ impl UpstreamTracer {
     }
 
     /// Traces the upstream network path from the local gateway to the public Internet,
-    /// identifying intermediate subnets (such as double-NAT/modem links) and carrier hops.
-    pub async fn trace(&self) -> Result<UpstreamPath> {
+    /// dynamically identifying intermediate subnets (such as double-NAT/modem links) and carrier hops.
+    pub async fn trace(
+        &self,
+        primary_subnet: Option<&IpNetwork>,
+        default_gateway: Option<IpAddr>,
+    ) -> Result<UpstreamPath> {
         info!("Tracing upstream network hops between gateway and Internet...");
         let mut path = UpstreamPath::default();
 
         // 1. Fetch Public IP and ISP Information via Reqwest
         self.fetch_public_ip_info(&mut path).await;
 
-        // 2. Execute tracepath / traceroute asynchronously
-        self.trace_route_hops(&mut path).await;
-
-        // 3. Identify and document intermediate subnets
-        for hop in &path.hops {
-            if let Some(ip) = hop.ip
-                && let IpAddr::V4(v4) = ip
-            {
-                let octets = v4.octets();
-                // Detect private intermediate subnets (192.168.0.0/24, 10.0.0.0/8, etc.)
-                if octets[0] == 192 && octets[1] == 168 && octets[2] != 1 {
-                    let subnet = format!("192.168.{}.0/24", octets[2]);
-                    if !path.intermediate_subnets.contains(&subnet) {
-                        path.intermediate_subnets.push(subnet);
-                    }
-                }
-            }
-        }
+        // 2. Execute tracepath asynchronously
+        self.trace_route_hops(&mut path, primary_subnet, default_gateway)
+            .await;
 
         info!(
             "Upstream path mapped: Public IP: {:?}, Intermediate Subnets: {:?}",
@@ -81,11 +71,15 @@ impl UpstreamTracer {
         }
     }
 
-    /// Executes tracepath or traceroute to inspect each intermediate hop.
-    async fn trace_route_hops(&self, path: &mut UpstreamPath) {
-        // Run tracepath with max 6 hops so it returns in ~40ms without waiting for internet timeouts
+    /// Executes tracepath to inspect each intermediate hop dynamically.
+    async fn trace_route_hops(
+        &self,
+        path: &mut UpstreamPath,
+        primary_subnet: Option<&IpNetwork>,
+        default_gateway: Option<IpAddr>,
+    ) {
         let output = tokio::time::timeout(
-            Duration::from_secs(3),
+            Duration::from_secs(6),
             Command::new("tracepath")
                 .args(["-m", "6", "-n", "8.8.8.8"])
                 .stdout(Stdio::piped())
@@ -94,11 +88,12 @@ impl UpstreamTracer {
         )
         .await;
 
-        let hop_re = Regex::new(r"^\s*(\d+):\s+([0-9.]+)\s+([0-9.]+ms)").unwrap();
+        let hop_re = Regex::new(r"^\s*(\d+):\s+([0-9.]+)\s+([0-9.]+)ms").unwrap();
 
         if let Ok(Ok(out)) = output {
             let text = String::from_utf8_lossy(&out.stdout);
             let mut hops = Vec::new();
+            let mut reached_public = false;
 
             for line in text.lines() {
                 if let Some(caps) = hop_re.captures(line) {
@@ -107,40 +102,70 @@ impl UpstreamTracer {
                     let rtt_str = &caps[3];
                     let rtt: Option<f32> = rtt_str.trim_end_matches("ms").parse().ok();
 
-                    // Categorize hop
-                    let (network_label, description) = match hop_num {
-                        1 => (
-                            "Local LAN Gateway".to_string(),
-                            "Primary Customer Gateway (UniFi Cloud Gateway Max)".to_string(),
-                        ),
-                        2 => (
-                            "WAN Interconnect Subnet (192.168.0.0/24)".to_string(),
-                            "Intermediate ISP Gateway / FTTH Modem (Zyxel Gateway)".to_string(),
-                        ),
-                        3 => (
-                            "Broadband Network Gateway (BNG)".to_string(),
-                            "Carrier Edge Termination (Odido FTTH Fiber Gateway)".to_string(),
-                        ),
-                        4 | 5 => (
-                            "Carrier Core & CGNAT Transit".to_string(),
-                            "Carrier Internal Routing & Core Aggregation".to_string(),
-                        ),
-                        _ => (
-                            "Public Internet Transit".to_string(),
-                            "Upstream Transit Hop".to_string(),
-                        ),
-                    };
+                    if let Some(hop_ip) = ip {
+                        let is_priv = is_private_ip(hop_ip);
+                        let in_primary = primary_subnet
+                            .map(|net| net.contains(hop_ip))
+                            .unwrap_or(false);
 
-                    // Avoid duplicate consecutive hops from tracepath
-                    if !hops.iter().any(|h: &UpstreamHop| h.hop_number == hop_num) {
-                        hops.push(UpstreamHop {
-                            hop_number: hop_num,
-                            ip,
-                            hostname: None,
-                            rtt_ms: rtt,
-                            network_label,
-                            description,
-                        });
+                        if !is_priv && !is_cgnat(hop_ip) {
+                            reached_public = true;
+                        }
+
+                        // If private, not in primary local subnet, and BEFORE reaching public internet:
+                        // It is an intermediate interconnect subnet!
+                        if is_priv && !in_primary && !reached_public {
+                            let subnet_str = derive_subnet_cidr(hop_ip);
+                            if !path.intermediate_subnets.contains(&subnet_str) {
+                                path.intermediate_subnets.push(subnet_str.clone());
+                            }
+                        }
+
+                        // Categorize hop dynamically
+                        let (network_label, description) =
+                            if hop_num == 1 && (in_primary || Some(hop_ip) == default_gateway) {
+                                (
+                                    "Local LAN Gateway".to_string(),
+                                    "Primary Default Gateway".to_string(),
+                                )
+                            } else if is_priv && !in_primary && !reached_public {
+                                let sub = derive_subnet_cidr(hop_ip);
+                                (
+                                    format!("WAN Interconnect ({})", sub),
+                                    "Intermediate Upstream Gateway / CPE Modem".to_string(),
+                                )
+                            } else if is_priv || is_cgnat(hop_ip) {
+                                (
+                                    "Carrier Core / CGNAT Transit".to_string(),
+                                    "Carrier Internal Core Routing".to_string(),
+                                )
+                            } else if hop_num <= 3 {
+                                let isp_label = path
+                                    .carrier_as
+                                    .as_deref()
+                                    .unwrap_or("Broadband Network Gateway");
+                                (
+                                    format!("Carrier Edge ({})", isp_label),
+                                    "Broadband Network Gateway Termination".to_string(),
+                                )
+                            } else {
+                                (
+                                    "Public Internet Transit".to_string(),
+                                    "Upstream Internet Backbone Hop".to_string(),
+                                )
+                            };
+
+                        if !hops.iter().any(|h: &UpstreamHop| h.hop_number == hop_num) {
+                            hops.push(UpstreamHop {
+                                hop_number: hop_num,
+                                ip: Some(hop_ip),
+                                hostname: None,
+                                rtt_ms: rtt,
+                                is_private: is_priv,
+                                network_label,
+                                description,
+                            });
+                        }
                     }
                 }
             }
@@ -151,32 +176,66 @@ impl UpstreamTracer {
             }
         }
 
-        // If tracepath not available, synthesize known gateway route hops
-        path.hops = vec![
-            UpstreamHop {
+        // Fallback: If tracepath is unavailable or blocked, synthesize from verified system info
+        let mut fallback_hops = Vec::new();
+        if let Some(gw) = default_gateway {
+            fallback_hops.push(UpstreamHop {
                 hop_number: 1,
-                ip: "192.168.1.1".parse().ok(),
-                hostname: Some("unifi.localdomain".to_string()),
-                rtt_ms: Some(2.2),
+                ip: Some(gw),
+                hostname: None,
+                rtt_ms: None,
+                is_private: true,
                 network_label: "Local LAN Gateway".to_string(),
-                description: "Primary Customer Gateway (UniFi Cloud Gateway Max)".to_string(),
-            },
-            UpstreamHop {
+                description: "Primary Default Gateway".to_string(),
+            });
+        }
+        if let Some(pub_ip) = path.public_ip {
+            let isp_label = path.carrier_as.as_deref().unwrap_or("Public Internet");
+            fallback_hops.push(UpstreamHop {
                 hop_number: 2,
-                ip: "192.168.0.1".parse().ok(),
-                hostname: None,
-                rtt_ms: Some(4.6),
-                network_label: "WAN Interconnect (192.168.0.0/24)".to_string(),
-                description: "ISP Gateway / FTTH Modem (Zyxel Gateway)".to_string(),
-            },
-            UpstreamHop {
-                hop_number: 3,
-                ip: "85.144.56.1".parse().ok(),
-                hostname: None,
-                rtt_ms: Some(8.7),
-                network_label: "Carrier BNG Edge".to_string(),
-                description: "Odido FTTH Optical Termination".to_string(),
-            },
-        ];
+                ip: Some(pub_ip),
+                hostname: path.reverse_dns.clone(),
+                rtt_ms: None,
+                is_private: false,
+                network_label: format!("Internet Egress ({})", isp_label),
+                description: "Public Internet Egress".to_string(),
+            });
+        }
+        path.hops = fallback_hops;
+    }
+}
+
+/// Checks if an IP is in RFC 1918 private IPv4 space.
+fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            octets[0] == 10
+                || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+                || (octets[0] == 192 && octets[1] == 168)
+        }
+        IpAddr::V6(v6) => v6.is_loopback(),
+    }
+}
+
+/// Checks if an IP is in RFC 6598 CGNAT space (100.64.0.0/10).
+fn is_cgnat(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            octets[0] == 100 && (64..=127).contains(&octets[1])
+        }
+        IpAddr::V6(_) => false,
+    }
+}
+
+/// Derives a standard /24 CIDR representation from a private IP.
+fn derive_subnet_cidr(ip: IpAddr) -> String {
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            format!("{}.{}.{}.0/24", o[0], o[1], o[2])
+        }
+        IpAddr::V6(v6) => format!("{}/64", v6),
     }
 }

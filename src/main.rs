@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use ipnetwork::IpNetwork;
 use std::fs;
+use std::net::IpAddr;
 use std::path::Path;
 use tracing::{Level, info, warn};
 use tracing_subscriber::FmtSubscriber;
@@ -52,41 +53,27 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    // 2. Resolve Target Networks
-    let targets = resolve_targets(&args.target)?;
-    let target_strs: Vec<String> = targets.iter().map(|t| t.to_string()).collect();
-    info!("Target networks to scan: {}", target_strs.join(", "));
+    // 2. Discover Local Network Interface and Default Route
+    let primary_info = InterfaceDetector::detect_primary().ok();
+    let primary_net = primary_info
+        .as_ref()
+        .map(|p| IpNetwork::new(p.network.network(), p.prefix_len).unwrap_or(p.network));
+    let default_gateway = primary_info
+        .as_ref()
+        .and_then(|p| p.gateway.map(IpAddr::V4));
 
-    // 3. Initialize Scanner Engine
-    let scanner: Box<dyn NetworkScanner> = match args.backend {
-        BackendChoice::Native => {
-            info!("Scanner backend: Native Tokio Async Engine");
-            Box::new(NativeScanner::new(args.concurrency, args.timeout_ms))
-        }
-        BackendChoice::Nmap => {
-            info!("Scanner backend: Nmap Backend");
-            Box::new(NmapScanner::new(args.timeout_ms))
-        }
-        BackendChoice::Hybrid => {
-            info!("Scanner backend: Hybrid (Native Async + Nmap Enrichment)");
-            Box::new(HybridScanner::new(args.concurrency, args.timeout_ms))
-        }
-    };
+    if let (Some(net), Some(gw)) = (&primary_net, &default_gateway) {
+        info!(
+            "Primary network interface: {} (default gateway: {})",
+            net, gw
+        );
+    }
 
-    // 4. Execute Network Scan
-    let mut devices = scanner.scan_network(&targets).await?;
-    info!("Discovered {} active host(s)", devices.len());
-
-    // 5. Device Fingerprinting Pipeline
-    info!("Fingerprinting devices via HTTP, Google Cast, and MAC OUI...");
-    let pipeline = FingerprintPipeline::new(args.concurrency);
-    pipeline.enrich_all(&mut devices).await;
-    info!("Device fingerprinting completed");
-
-    // 6. Upstream Path Trace (Between Gateway and Internet)
+    // 3. Upstream Path Trace (Between Gateway and Internet)
+    // Run upstream trace before target scanning to auto-discover intermediate subnets dynamically
     let upstream_path = if !args.skip_upstream {
         let tracer = UpstreamTracer::new();
-        match tracer.trace().await {
+        match tracer.trace(primary_net.as_ref(), default_gateway).await {
             Ok(p) => {
                 info!(
                     "Upstream path identified: Public IP {:?}, {} intermediate hop(s)",
@@ -105,18 +92,63 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
         Default::default()
     };
 
-    // 7. Build Topology Model
+    // 4. Resolve Target Networks Dynamically
+    let targets = resolve_targets(
+        &args.target,
+        primary_net.as_ref(),
+        &upstream_path.intermediate_subnets,
+    )?;
+    let target_strs: Vec<String> = targets.iter().map(|t| t.to_string()).collect();
+    info!("Target networks to scan: {}", target_strs.join(", "));
+
+    // 5. Initialize Scanner Engine
+    let scanner: Box<dyn NetworkScanner> = match args.backend {
+        BackendChoice::Native => {
+            info!("Scanner backend: Native Tokio Async Engine");
+            Box::new(NativeScanner::new(args.concurrency, args.timeout_ms))
+        }
+        BackendChoice::Nmap => {
+            info!("Scanner backend: Nmap Backend");
+            Box::new(NmapScanner::new(args.timeout_ms))
+        }
+        BackendChoice::Hybrid => {
+            info!("Scanner backend: Hybrid (Native Async + Nmap Enrichment)");
+            Box::new(HybridScanner::new(args.concurrency, args.timeout_ms))
+        }
+    };
+
+    // 6. Execute Network Scan
+    let mut devices = scanner.scan_network(&targets).await?;
+    info!("Discovered {} active host(s)", devices.len());
+
+    // 7. Flag Discovered Gateways
+    for dev in &mut devices {
+        if Some(dev.ip) == default_gateway
+            || upstream_path.hops.iter().any(|h| h.ip == Some(dev.ip))
+        {
+            dev.is_gateway = true;
+        }
+    }
+
+    // 8. Device Fingerprinting Pipeline
+    info!("Fingerprinting devices via HTTP, Google Cast, and MAC OUI...");
+    let pipeline = FingerprintPipeline::new(args.concurrency);
+    pipeline.enrich_all(&mut devices).await;
+    info!("Device fingerprinting completed");
+
+    // 9. Build Abstract In-Memory Topology Model
     let local_subnets = targets.iter().map(|t| t.to_string()).collect();
     let mut topology = NetworkTopology::new(local_subnets);
+    topology.primary_gateway = default_gateway;
     topology.devices = devices;
     topology.upstream = upstream_path;
 
-    // 8. Generate Reports
+    // 10. Generate Reports Dynamically from the Abstract Topology Model
     info!("Generating network diagram and documentation...");
     let mermaid_diagram = MermaidGenerator::generate(&topology);
     let markdown_summary = MarkdownSummaryGenerator::generate(&topology);
 
-    // 9. Write Output Files
+    // 11. Write Output Files
     let out_dir = Path::new(&args.output_dir);
     if !out_dir.exists() {
         fs::create_dir_all(out_dir)
@@ -138,8 +170,13 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
     Ok(())
 }
 
-/// Resolves target subnets from CLI arguments or auto-detects local LAN and intermediate gateway subnets.
-fn resolve_targets(cli_targets: &[String]) -> Result<Vec<IpNetwork>> {
+/// Resolves target subnets dynamically without hardcoding assumptions.
+fn resolve_targets(
+    cli_targets: &[String],
+    primary_net: Option<&IpNetwork>,
+    intermediate_subnets: &[String],
+) -> Result<Vec<IpNetwork>> {
+    // If CLI targets provided, respect user input
     if !cli_targets.is_empty() {
         let mut list = Vec::new();
         for s in cli_targets {
@@ -151,20 +188,18 @@ fn resolve_targets(cli_targets: &[String]) -> Result<Vec<IpNetwork>> {
         return Ok(list);
     }
 
-    // Auto-detection mode
+    // Auto-detection mode: primary LAN + any intermediate subnets discovered upstream
     let mut detected = Vec::new();
 
-    // 1. Auto-detect primary LAN interface (e.g. 192.168.1.0/24)
-    if let Ok(primary) = InterfaceDetector::detect_primary() {
-        let base_net = IpNetwork::new(primary.network.network(), primary.prefix_len)
-            .unwrap_or(primary.network);
-        detected.push(base_net);
+    if let Some(primary) = primary_net {
+        detected.push(*primary);
+    }
 
-        // 2. Auto-include intermediate upstream gateway network (e.g. 192.168.0.0/24)
-        if primary.network.network().to_string() == "192.168.1.0"
-            && let Ok(interconnect) = "192.168.0.0/24".parse::<IpNetwork>()
+    for sub_str in intermediate_subnets {
+        if let Ok(net) = sub_str.parse::<IpNetwork>()
+            && !detected.contains(&net)
         {
-            detected.push(interconnect);
+            detected.push(net);
         }
     }
 

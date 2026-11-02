@@ -25,18 +25,83 @@ impl MarkdownSummaryGenerator {
 
         // 1. Executive Summary
         doc.push_str("## 1. Executive Summary\n\n");
-        doc.push_str("This document outlines the network topology, subnet architecture, and connected device profiles.\n");
-        doc.push_str("The infrastructure operates on a **dual-tier router / cascaded gateway architecture**:\n\n");
-        doc.push_str("1. **Carrier Edge & Upstream Modem:** Connected to **Odido Netherlands B.V.** via fiber optical broadband.\n");
-        doc.push_str("2. **Intermediate WAN Interconnect Subnet (`192.168.0.0/24`):** Isolates traffic between the ISP Zyxel gateway (`192.168.0.1`) and the customer gateway WAN interface (`192.168.0.2`).\n");
-        doc.push_str("3. **Primary Internal Network (`192.168.1.0/24`):** Managed by the **UniFi Cloud Gateway Max (UCG-Max)** (`192.168.1.1`), providing DHCP, DNS, and hardware routing.\n");
-        doc.push_str("4. **Wireless Mesh System:** An **ASUS Wi-Fi 6 AiMesh system** operating in Access Point (AP) mode, with an **ASUS RT-AX88U** master controller and an **ASUS AiMesh Satellite Node**.\n");
-        doc.push_str("5. **Wired Switching:** A **Netgear GS305EP 5-Port Gigabit Smart Managed Plus PoE+ Switch**.\n\n");
+        doc.push_str("This document outlines the network topology, subnet architecture, and connected device profiles.\n\n");
+
+        if !topology.upstream.intermediate_subnets.is_empty() {
+            doc.push_str(&format!(
+                "- **Architecture Type:** Cascaded Multi-Tier Architecture with intermediate WAN interconnect subnet(s) ({}).\n",
+                topology.upstream.intermediate_subnets.join(", ")
+            ));
+        } else {
+            doc.push_str("- **Architecture Type:** Single-Tier Gateway Architecture.\n");
+        }
+
+        if let Some(pub_ip) = topology.upstream.public_ip {
+            let isp_str = topology
+                .upstream
+                .carrier_as
+                .as_deref()
+                .unwrap_or("Public Internet");
+            doc.push_str(&format!(
+                "- **Internet Egress:** Public IP `{}` via `{}`.\n",
+                pub_ip, isp_str
+            ));
+        }
+
+        if let Some(primary_r) = topology.primary_router() {
+            doc.push_str(&format!(
+                "- **Primary Gateway:** **{}** (`{}`) - {}\n",
+                primary_r.device_name,
+                primary_r.ip,
+                primary_r
+                    .notes
+                    .as_deref()
+                    .unwrap_or("Local subnet gateway and router")
+            ));
+        }
+
+        let switches = topology.switches();
+        if !switches.is_empty() {
+            let sw_names: Vec<String> = switches
+                .iter()
+                .map(|s| format!("{} (`{}`)", s.device_name, s.ip))
+                .collect();
+            doc.push_str(&format!(
+                "- **Wired Switching:** Discovered {} switch device(s): {}.\n",
+                switches.len(),
+                sw_names.join(", ")
+            ));
+        }
+
+        let aps = topology.access_points();
+        if !aps.is_empty() {
+            let ap_names: Vec<String> = aps
+                .iter()
+                .map(|a| format!("{} (`{}`)", a.device_name, a.ip))
+                .collect();
+            doc.push_str(&format!(
+                "- **Wireless Infrastructure:** Discovered {} access point(s): {}.\n",
+                aps.len(),
+                ap_names.join(", ")
+            ));
+        }
+
+        doc.push_str(&format!(
+            "- **Active Subnets Monitored:** {}\n\n",
+            topology.local_subnets.join(", ")
+        ));
         doc.push_str("---\n\n");
 
         // 2. Upstream Network Path (Between Gateway and the Internet)
         doc.push_str("## 2. Upstream Networks (Between Gateway and the Internet)\n\n");
-        doc.push_str("The upstream network path between the primary LAN gateway (`192.168.1.1`) and the public Internet was traced and verified:\n\n");
+        let gw_desc = topology
+            .primary_gateway
+            .map(|ip| format!("primary LAN gateway (`{}`)", ip))
+            .unwrap_or_else(|| "local gateway".to_string());
+        doc.push_str(&format!(
+            "The upstream network path between the {} and the public Internet was traced and verified:\n\n",
+            gw_desc
+        ));
 
         if let Some(pub_ip) = topology.upstream.public_ip {
             doc.push_str(&format!("- **Public IPv4 Address:** `{}`\n", pub_ip));

@@ -59,11 +59,11 @@ impl NetworkScanner for NmapScanner {
         for line in text.lines() {
             if let Some(caps) = report_re.captures(line) {
                 if let Some(ip) = current_ip {
-                    let zone = if ip.to_string().starts_with("192.168.0.") {
-                        "WAN Interconnect"
-                    } else {
-                        "Local LAN"
-                    };
+                    let zone = targets
+                        .iter()
+                        .find(|t| t.contains(ip))
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "LAN".to_string());
                     let mut dev = Device::new(ip, zone);
                     dev.hostname = current_hostname.clone();
                     dev.mac = current_mac.clone();
@@ -85,11 +85,11 @@ impl NetworkScanner for NmapScanner {
         }
 
         if let Some(ip) = current_ip {
-            let zone = if ip.to_string().starts_with("192.168.0.") {
-                "WAN Interconnect"
-            } else {
-                "Local LAN"
-            };
+            let zone = targets
+                .iter()
+                .find(|t| t.contains(ip))
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "LAN".to_string());
             let mut dev = Device::new(ip, zone);
             dev.hostname = current_hostname.clone();
             dev.mac = current_mac.clone();

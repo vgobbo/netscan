@@ -91,6 +91,7 @@ pub struct Device {
     pub http_title: Option<String>,
     pub http_server: Option<String>,
     pub notes: Option<String>,
+    pub is_gateway: bool,
     pub attributes: BTreeMap<String, String>,
 }
 
@@ -109,6 +110,7 @@ impl Device {
             http_title: None,
             http_server: None,
             notes: None,
+            is_gateway: false,
             attributes: BTreeMap::new(),
         }
     }
@@ -140,6 +142,7 @@ pub struct UpstreamHop {
     pub ip: Option<IpAddr>,
     pub hostname: Option<String>,
     pub rtt_ms: Option<f32>,
+    pub is_private: bool,
     pub network_label: String,
     pub description: String,
 }
@@ -161,6 +164,7 @@ pub struct NetworkTopology {
     pub devices: Vec<Device>,
     pub upstream: UpstreamPath,
     pub local_subnets: Vec<String>,
+    pub primary_gateway: Option<IpAddr>,
 }
 
 impl NetworkTopology {
@@ -170,6 +174,41 @@ impl NetworkTopology {
             devices: Vec::new(),
             upstream: UpstreamPath::default(),
             local_subnets,
+            primary_gateway: None,
         }
+    }
+
+    /// Returns devices that act as routers or gateways.
+    pub fn routers(&self) -> Vec<&Device> {
+        self.devices
+            .iter()
+            .filter(|d| d.device_type == DeviceType::Router || d.is_gateway)
+            .collect()
+    }
+
+    /// Returns devices identified as network switches.
+    pub fn switches(&self) -> Vec<&Device> {
+        self.devices
+            .iter()
+            .filter(|d| d.device_type == DeviceType::Switch)
+            .collect()
+    }
+
+    /// Returns devices identified as wireless access points.
+    pub fn access_points(&self) -> Vec<&Device> {
+        self.devices
+            .iter()
+            .filter(|d| d.device_type == DeviceType::AccessPoint)
+            .collect()
+    }
+
+    /// Identifies the primary local LAN gateway / router.
+    pub fn primary_router(&self) -> Option<&Device> {
+        if let Some(gw_ip) = self.primary_gateway
+            && let Some(dev) = self.devices.iter().find(|d| d.ip == gw_ip)
+        {
+            return Some(dev);
+        }
+        self.routers().into_iter().next()
     }
 }

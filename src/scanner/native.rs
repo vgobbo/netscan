@@ -80,11 +80,7 @@ impl NetworkScanner for NativeScanner {
 
         let mut ip_list = Vec::new();
         for target in targets {
-            let zone = if target.to_string().starts_with("192.168.0.") {
-                "WAN Interconnect"
-            } else {
-                "Local LAN"
-            };
+            let zone = target.to_string();
 
             for ip in target.iter() {
                 // Skip broadcast and network IDs for /24 subnets
