@@ -2,5 +2,6 @@
 **/*.rs.bk
 network_summary.md
 network_diagram.mmd
+network_diagram.html
 network_topology.json
 NETWORK_TOPOLOGY.md

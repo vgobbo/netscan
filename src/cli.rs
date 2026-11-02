@@ -55,6 +55,10 @@ pub struct ScanArgs {
     #[arg(long, default_value = "network_topology.json")]
     pub output_json: String,
 
+    /// Standalone interactive HTML viewer file name
+    #[arg(long, default_value = "network_diagram.html")]
+    pub output_html: String,
+
     /// Skip tracing upstream hops to the public Internet
     #[arg(long)]
     pub skip_upstream: bool,

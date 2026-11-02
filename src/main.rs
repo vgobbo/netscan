@@ -19,7 +19,7 @@ use cli::{BackendChoice, Cli, Commands, ScanArgs};
 use fingerprint::FingerprintPipeline;
 use model::NetworkTopology;
 use net::InterfaceDetector;
-use report::{JsonGenerator, MarkdownSummaryGenerator, MermaidGenerator};
+use report::{HtmlViewerGenerator, JsonGenerator, MarkdownSummaryGenerator, MermaidGenerator};
 use scanner::{HybridScanner, NativeScanner, NetworkScanner, NmapScanner};
 use upstream::UpstreamTracer;
 
@@ -144,10 +144,11 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
     topology.upstream = upstream_path;
 
     // 10. Generate Reports Dynamically from the Abstract Topology Model
-    info!("Generating network diagram, documentation, and JSON export...");
+    info!("Generating network diagram, documentation, HTML viewer, and JSON export...");
     let mermaid_diagram = MermaidGenerator::generate(&topology);
     let markdown_summary = MarkdownSummaryGenerator::generate(&topology);
     let json_export = JsonGenerator::generate(&topology)?;
+    let html_viewer = HtmlViewerGenerator::generate(&topology, &mermaid_diagram);
 
     // 11. Write Output Files
     let out_dir = Path::new(&args.output_dir);
@@ -159,6 +160,7 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
     let md_path = out_dir.join(&args.output_md);
     let mmd_path = out_dir.join(&args.output_mmd);
     let json_path = out_dir.join(&args.output_json);
+    let html_path = out_dir.join(&args.output_html);
 
     fs::write(&md_path, &markdown_summary)
         .context(format!("Failed to write markdown report to {:?}", md_path))?;
@@ -168,10 +170,15 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
         "Failed to write JSON topology data to {:?}",
         json_path
     ))?;
+    fs::write(&html_path, &html_viewer).context(format!(
+        "Failed to write HTML topology viewer to {:?}",
+        html_path
+    ))?;
 
     info!("Scan complete! Artifacts generated successfully:");
     info!("  - Markdown report: {}", md_path.display());
     info!("  - Mermaid diagram: {}", mmd_path.display());
+    info!("  - HTML viewer:     {}", html_path.display());
     info!("  - JSON data:       {}", json_path.display());
 
     Ok(())
