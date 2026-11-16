@@ -1,4 +1,5 @@
 pub mod cast;
+pub mod daikin;
 pub mod homewizard;
 pub mod http;
 pub mod oui;

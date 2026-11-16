@@ -86,6 +86,16 @@ fn build_builtin_oui() -> HashMap<String, &'static str> {
     m.insert("5C353B".to_string(), "Zyxel Communications");
     m.insert("CC5D4E".to_string(), "Zyxel Communications");
 
+    // Daikin
+    m.insert("00804F".to_string(), "Daikin Industries");
+    m.insert("04ED62".to_string(), "Daikin Europe NV");
+    m.insert("601803".to_string(), "Daikin Air-conditioning (Shanghai)");
+    m.insert("644EEB".to_string(), "Daikin Holdings Singapore Pte");
+
+    // Murata Manufacturing (used in Daikin & other IoT Wi-Fi modules)
+    m.insert("24CD8D".to_string(), "Murata Manufacturing");
+    m.insert("FC84A7".to_string(), "Murata Manufacturing");
+
     m
 }
 

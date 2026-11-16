@@ -199,6 +199,7 @@ impl MarkdownSummaryGenerator {
             DeviceType::SmartHomeHub,
             DeviceType::Surveillance,
             DeviceType::EnergySolar,
+            DeviceType::Climate,
             DeviceType::Appliance,
             DeviceType::Entertainment,
             DeviceType::Mobile,

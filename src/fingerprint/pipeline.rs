@@ -1,4 +1,5 @@
 use crate::fingerprint::cast::CastProber;
+use crate::fingerprint::daikin::DaikinProber;
 use crate::fingerprint::homewizard::HomeWizardProber;
 use crate::fingerprint::http::HttpProber;
 use crate::fingerprint::oui::OuiMatcher;
@@ -60,7 +61,7 @@ impl FingerprintPipeline {
         }
     }
 
-    /// Enriches a single device using MAC, HTTP, Cast, and HomeWizard probes.
+    /// Enriches a single device using MAC, HTTP, Cast, HomeWizard, and Daikin probes.
     pub async fn enrich_device(device: &mut Device, client: &Client) {
         // 1. MAC Vendor Lookup
         if let Some(mac) = &device.mac
@@ -92,8 +93,29 @@ impl FingerprintPipeline {
             None
         };
 
-        // 5. Apply Rules Engine
-        RuleEngine::classify(device, &http_fp, cast_info.as_ref(), hw_info.as_ref());
+        // 5. Daikin Probing (UDP discovery on port 30050 / HTTP /common/basic_info fallback)
+        let vendor_matches_daikin = device.vendor.as_deref().is_some_and(|v| {
+            let lower = v.to_lowercase();
+            lower.contains("daikin") || lower.contains("murata")
+        });
+        let should_probe_daikin = http_fp.is_daikin
+            || device.open_ports.contains(&80)
+            || device.open_ports.is_empty()
+            || vendor_matches_daikin;
+        let daikin_info = if should_probe_daikin && cast_info.is_none() && hw_info.is_none() {
+            DaikinProber::probe(client, device.ip, &device.open_ports).await
+        } else {
+            None
+        };
+
+        // 6. Apply Rules Engine
+        RuleEngine::classify(
+            device,
+            &http_fp,
+            cast_info.as_ref(),
+            hw_info.as_ref(),
+            daikin_info.as_ref(),
+        );
 
         debug!(
             "Device {} fingerprinted as: {} ({})",

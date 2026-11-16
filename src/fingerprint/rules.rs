@@ -1,4 +1,5 @@
 use crate::fingerprint::cast::GoogleCastInfo;
+use crate::fingerprint::daikin::DaikinInfo;
 use crate::fingerprint::homewizard::HomeWizardInfo;
 use crate::fingerprint::http::HttpFingerprint;
 use crate::model::{Device, DeviceType};
@@ -16,6 +17,7 @@ impl RuleEngine {
         http_fp: &HttpFingerprint,
         cast_info: Option<&GoogleCastInfo>,
         hw_info: Option<&HomeWizardInfo>,
+        daikin_info: Option<&DaikinInfo>,
     ) {
         let hostname = device.hostname.clone().unwrap_or_default().to_lowercase();
         let vendor = device.vendor.clone().unwrap_or_default().to_lowercase();
@@ -56,6 +58,12 @@ impl RuleEngine {
                 device.device_name = format!("HomeWizard {}", hw.product_name);
                 device.notes = Some("Smart power plug with energy metering".to_string());
             }
+            return;
+        }
+
+        // 2b. Daikin HVAC / Air Conditioning Units (UDP discovery or legacy HTTP API)
+        if let Some(daikin) = daikin_info {
+            Self::apply_daikin_classification(device, daikin);
             return;
         }
 
@@ -210,6 +218,16 @@ impl RuleEngine {
             return;
         }
 
+        // 9b. Daikin HVAC / Climate Fallback (when UDP discovery is unavailable)
+        if http_fp.is_daikin || vendor.contains("daikin") || hostname.contains("daikin") {
+            device.device_type = DeviceType::Climate;
+            device.vendor = Some("Daikin".to_string());
+            device.device_name = "Daikin Air Conditioner".to_string();
+            device.model = Some("Daikin Smart HVAC / Wi-Fi Adapter".to_string());
+            device.notes = Some("Smart HVAC / air conditioning unit".to_string());
+            return;
+        }
+
         // 10. Multimedia, Audio & Gaming
         if let Some(model) = &http_fp.is_yamaha {
             device.device_type = DeviceType::Entertainment;
@@ -307,5 +325,118 @@ impl RuleEngine {
         } else if let Some(v) = &device.vendor {
             device.device_name = format!("{} Device", v);
         }
+    }
+
+    /// Applies classification metadata from a verified Daikin probe response.
+    fn apply_daikin_classification(device: &mut Device, daikin: &DaikinInfo) {
+        device.device_type = DeviceType::Climate;
+        device.vendor = Some("Daikin".to_string());
+        device.device_name = match daikin.name.as_deref() {
+            Some(room) if !room.is_empty() => format!("Daikin AC - {}", room),
+            _ => "Daikin Air Conditioner".to_string(),
+        };
+
+        let unit_label = if daikin.cdev.as_deref() == Some("RA") {
+            "Daikin Room Air Conditioner"
+        } else {
+            "Daikin HVAC Unit"
+        };
+        let proto_suffix = match daikin.protocol.as_deref() {
+            Some(proto) if !proto.is_empty() => format!(" ({} Wi-Fi Adapter)", proto),
+            _ => " (Wi-Fi Adapter)".to_string(),
+        };
+        device.model = Some(format!("{}{}", unit_label, proto_suffix));
+
+        let mut details = Vec::new();
+        if let Some(ver) = &daikin.firmware_version {
+            details.push(format!("fw {}", ver));
+        }
+        if let Some(ssid) = &daikin.ssid {
+            details.push(format!("SSID {}", ssid));
+        }
+        device.notes = Some(if details.is_empty() {
+            "Smart HVAC / air conditioning unit".to_string()
+        } else {
+            format!(
+                "Smart HVAC / air conditioning unit ({})",
+                details.join(", ")
+            )
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    fn sample_device(ip_last: u8, mac: &str, vendor: Option<&str>) -> Device {
+        let mut d = Device::new(
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, ip_last)),
+            "192.168.1.0/24",
+        );
+        d.mac = Some(mac.to_string());
+        d.vendor = vendor.map(|v| v.to_string());
+        d.open_ports = vec![80];
+        d
+    }
+
+    #[test]
+    fn classifies_daikin_from_probe_info() {
+        let mut dev = sample_device(31, "24:cd:8d:8d:72:4e", Some("Murata Manufacturing"));
+        let daikin = DaikinInfo {
+            name: Some("Living room".to_string()),
+            unit_type: Some("GPF".to_string()),
+            cdev: Some("RA".to_string()),
+            protocol: Some("DGC".to_string()),
+            firmware_version: Some("2.6.2".to_string()),
+            ssid: Some("DaikinAP41424".to_string()),
+            adapter_kind: Some("4".to_string()),
+        };
+
+        RuleEngine::classify(
+            &mut dev,
+            &HttpFingerprint::default(),
+            None,
+            None,
+            Some(&daikin),
+        );
+
+        assert_eq!(dev.device_type, DeviceType::Climate);
+        assert_eq!(dev.vendor.as_deref(), Some("Daikin"));
+        assert_eq!(dev.device_name, "Daikin AC - Living room");
+        assert_eq!(
+            dev.model.as_deref(),
+            Some("Daikin Room Air Conditioner (DGC Wi-Fi Adapter)")
+        );
+        assert_eq!(
+            dev.notes.as_deref(),
+            Some("Smart HVAC / air conditioning unit (fw 2.6.2, SSID DaikinAP41424)")
+        );
+    }
+
+    #[test]
+    fn classifies_daikin_from_http_fallback_only() {
+        let mut dev = sample_device(210, "fc:84:a7:55:0c:96", Some("Murata Manufacturing"));
+        let http_fp = HttpFingerprint {
+            is_daikin: true,
+            ..Default::default()
+        };
+
+        RuleEngine::classify(&mut dev, &http_fp, None, None, None);
+
+        assert_eq!(dev.device_type, DeviceType::Climate);
+        assert_eq!(dev.vendor.as_deref(), Some("Daikin"));
+        assert_eq!(dev.device_name, "Daikin Air Conditioner");
+    }
+
+    #[test]
+    fn does_not_misclassify_unrelated_murata_device() {
+        let mut dev = sample_device(99, "fc:84:a7:00:00:01", Some("Murata Manufacturing"));
+        RuleEngine::classify(&mut dev, &HttpFingerprint::default(), None, None, None);
+
+        assert_eq!(dev.device_type, DeviceType::Unknown);
+        assert_eq!(dev.vendor.as_deref(), Some("Murata Manufacturing"));
+        assert_eq!(dev.device_name, "Murata Manufacturing Device");
     }
 }

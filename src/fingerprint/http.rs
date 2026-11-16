@@ -13,6 +13,7 @@ pub struct HttpFingerprint {
     pub is_mongoose_elinter: bool,
     pub is_yamaha: Option<String>,
     pub is_prometheus: bool,
+    pub is_daikin: bool,
 }
 
 pub struct HttpProber;
@@ -123,6 +124,14 @@ impl HttpProber {
                     // E-Linter solar inverter
                     if truncated.contains("Inverter firmware") || truncated.contains("staset.cgi") {
                         fp.is_mongoose_elinter = true;
+                    }
+
+                    // Daikin DGC / BRP069C4x embedded open-source software notice page
+                    if truncated.contains("<hrml lang=\"en\">")
+                        && truncated
+                            .contains("This software is included following open source software.")
+                    {
+                        fp.is_daikin = true;
                     }
                 }
 

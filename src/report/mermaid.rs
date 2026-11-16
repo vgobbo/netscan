@@ -237,6 +237,7 @@ impl MermaidGenerator {
                     first_switch.or(first_ap).unwrap_or(primary_hub)
                 }
                 DeviceType::Mobile
+                | DeviceType::Climate
                 | DeviceType::Appliance
                 | DeviceType::EnergySolar
                 | DeviceType::Entertainment
