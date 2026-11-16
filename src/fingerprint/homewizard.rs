@@ -1,3 +1,4 @@
+use crate::fingerprint::findings::HostFindings;
 use reqwest::Client;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -7,10 +8,32 @@ use tracing::debug;
 pub struct HomeWizardInfo {
     pub product_name: String,
     pub product_type: String,
-    #[allow(dead_code)]
     pub serial: Option<String>,
-    #[allow(dead_code)]
     pub firmware_version: Option<String>,
+}
+
+impl HomeWizardInfo {
+    /// Stores HomeWizard metadata in the host findings attribute map for TOML rule matching.
+    pub fn populate_findings(&self, findings: &mut HostFindings) {
+        findings.attributes.insert(
+            "homewizard.product_name".to_string(),
+            self.product_name.clone(),
+        );
+        findings.attributes.insert(
+            "homewizard.product_type".to_string(),
+            self.product_type.clone(),
+        );
+        if let Some(serial) = &self.serial {
+            findings
+                .attributes
+                .insert("homewizard.serial".to_string(), serial.clone());
+        }
+        if let Some(ver) = &self.firmware_version {
+            findings
+                .attributes
+                .insert("homewizard.firmware_version".to_string(), ver.clone());
+        }
+    }
 }
 
 pub struct HomeWizardProber;

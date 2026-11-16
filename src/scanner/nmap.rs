@@ -1,10 +1,10 @@
 use crate::model::Device;
-use crate::net::ArpReader;
 use crate::scanner::NetworkScanner;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use ipnetwork::IpNetwork;
 use regex::Regex;
+use std::collections::HashMap;
 use std::net::IpAddr;
 use tokio::process::Command;
 use tracing::info;
@@ -30,20 +30,75 @@ impl NmapScanner {
             .map(|s| s.success())
             .unwrap_or(false)
     }
+
+    async fn run_nmap_ports(
+        &self,
+        ips: &[IpAddr],
+        ports: Option<&[u16]>,
+    ) -> Result<HashMap<IpAddr, Vec<u16>>> {
+        let mut results: HashMap<IpAddr, Vec<u16>> = HashMap::new();
+        if ips.is_empty() {
+            return Ok(results);
+        }
+
+        let ip_strs: Vec<String> = ips.iter().map(|i| i.to_string()).collect();
+        let mut cmd = Command::new("nmap");
+        cmd.arg("-sT");
+        if let Some(port_list) = ports {
+            if port_list.is_empty() {
+                return Ok(results);
+            }
+            let p_arg = port_list
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            cmd.args(["-p", &p_arg]);
+        } else {
+            cmd.arg("-F");
+        }
+        cmd.args(&ip_strs);
+
+        let output = cmd.output().await.context("Failed to run nmap port scan")?;
+        let text = String::from_utf8_lossy(&output.stdout);
+
+        let report_re =
+            Regex::new(r"Nmap scan report for (?:([^\s()]+)\s+\()?([0-9.]+)\)?").unwrap();
+        let port_re = Regex::new(r"^(\d+)/tcp\s+open").unwrap();
+
+        let mut cur_ip: Option<IpAddr> = None;
+        for line in text.lines() {
+            if let Some(caps) = report_re.captures(line) {
+                cur_ip = caps.get(2).and_then(|m| m.as_str().parse::<IpAddr>().ok());
+            } else if let Some(caps) = port_re.captures(line)
+                && let (Some(ip), Some(p_str)) = (cur_ip, caps.get(1))
+                && let Ok(p) = p_str.as_str().parse::<u16>()
+            {
+                let entry = results.entry(ip).or_default();
+                if !entry.contains(&p) {
+                    entry.push(p);
+                }
+            }
+        }
+
+        for list in results.values_mut() {
+            list.sort_unstable();
+        }
+        Ok(results)
+    }
 }
 
 #[async_trait]
 impl NetworkScanner for NmapScanner {
-    async fn scan_network(&self, targets: &[IpNetwork]) -> Result<Vec<Device>> {
-        info!("Executing Nmap ping and port discovery...");
+    async fn enumerate_hosts(&self, targets: &[IpNetwork]) -> Result<Vec<Device>> {
+        info!("Executing Nmap host enumeration (-sn)...");
         let target_strs: Vec<String> = targets.iter().map(|t| t.to_string()).collect();
 
-        // 1. Run nmap -sn to discover hosts
         let mut cmd = Command::new("nmap");
         cmd.arg("-sn");
         cmd.args(&target_strs);
 
-        let output = cmd.output().await.context("Failed to run nmap")?;
+        let output = cmd.output().await.context("Failed to run nmap -sn")?;
         let text = String::from_utf8_lossy(&output.stdout);
 
         let report_re =
@@ -56,22 +111,36 @@ impl NetworkScanner for NmapScanner {
         let mut current_mac: Option<String> = None;
         let mut current_vendor: Option<String> = None;
 
+        let flush = |discovered: &mut Vec<Device>,
+                     ip: IpAddr,
+                     hostname: Option<String>,
+                     mac: Option<String>,
+                     vendor: Option<String>| {
+            let zone = targets
+                .iter()
+                .find(|t| t.contains(ip))
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "LAN".to_string());
+            let mut dev = Device::new(ip, zone);
+            dev.hostname = hostname.clone();
+            dev.mac = mac;
+            dev.vendor = vendor;
+            if let Some(h) = hostname {
+                dev.device_name = h;
+            }
+            discovered.push(dev);
+        };
+
         for line in text.lines() {
             if let Some(caps) = report_re.captures(line) {
                 if let Some(ip) = current_ip {
-                    let zone = targets
-                        .iter()
-                        .find(|t| t.contains(ip))
-                        .map(|t| t.to_string())
-                        .unwrap_or_else(|| "LAN".to_string());
-                    let mut dev = Device::new(ip, zone);
-                    dev.hostname = current_hostname.clone();
-                    dev.mac = current_mac.clone();
-                    dev.vendor = current_vendor.clone();
-                    if let Some(h) = current_hostname.clone() {
-                        dev.device_name = h;
-                    }
-                    discovered.push(dev);
+                    flush(
+                        &mut discovered,
+                        ip,
+                        current_hostname.clone(),
+                        current_mac.clone(),
+                        current_vendor.clone(),
+                    );
                 }
 
                 current_hostname = caps.get(1).map(|m| m.as_str().to_string());
@@ -85,77 +154,28 @@ impl NetworkScanner for NmapScanner {
         }
 
         if let Some(ip) = current_ip {
-            let zone = targets
-                .iter()
-                .find(|t| t.contains(ip))
-                .map(|t| t.to_string())
-                .unwrap_or_else(|| "LAN".to_string());
-            let mut dev = Device::new(ip, zone);
-            dev.hostname = current_hostname.clone();
-            dev.mac = current_mac.clone();
-            dev.vendor = current_vendor.clone();
-            if let Some(h) = current_hostname {
-                dev.device_name = h;
-            }
-            discovered.push(dev);
-        }
-
-        // Fill any missing MAC addresses from ARP table
-        let arp = ArpReader::get_table();
-        for dev in &mut discovered {
-            if dev.mac.is_none()
-                && let Some(m) = arp.get(&dev.ip)
-            {
-                dev.mac = Some(m.clone());
-            }
-        }
-
-        // 2. Scan ports for discovered devices
-        if !discovered.is_empty() {
-            let ips: Vec<String> = discovered.iter().map(|d| d.ip.to_string()).collect();
-            let mut port_cmd = Command::new("nmap");
-            port_cmd.args(["-sT", "-F"]);
-            port_cmd.args(&ips);
-
-            if let Ok(port_output) = port_cmd.output().await {
-                let port_text = String::from_utf8_lossy(&port_output.stdout);
-                let port_re = Regex::new(r"^(\d+)/tcp\s+open").unwrap();
-
-                let mut cur_ip: Option<IpAddr> = None;
-                for line in port_text.lines() {
-                    if let Some(caps) = report_re.captures(line) {
-                        cur_ip = caps.get(2).and_then(|m| m.as_str().parse::<IpAddr>().ok());
-                    } else if let Some(caps) = port_re.captures(line)
-                        && let (Some(ip), Some(p_str)) = (cur_ip, caps.get(1))
-                        && let Ok(p) = p_str.as_str().parse::<u16>()
-                        && let Some(dev) = discovered.iter_mut().find(|d| d.ip == ip)
-                        && !dev.open_ports.contains(&p)
-                    {
-                        dev.open_ports.push(p);
-                    }
-                }
-            }
+            flush(
+                &mut discovered,
+                ip,
+                current_hostname,
+                current_mac,
+                current_vendor,
+            );
         }
 
         discovered.sort_by_key(|a| a.ip);
         Ok(discovered)
     }
 
-    async fn scan_ports(&self, ip: IpAddr, _ports: &[u16]) -> Result<Vec<u16>> {
-        let mut cmd = Command::new("nmap");
-        cmd.args(["-sT", "-F", &ip.to_string()]);
-        let output = cmd.output().await.context("Failed to run nmap")?;
-        let text = String::from_utf8_lossy(&output.stdout);
+    async fn scan_ports_batch(
+        &self,
+        ips: &[IpAddr],
+        ports: &[u16],
+    ) -> Result<HashMap<IpAddr, Vec<u16>>> {
+        self.run_nmap_ports(ips, Some(ports)).await
+    }
 
-        let port_re = Regex::new(r"^(\d+)/tcp\s+open").unwrap();
-        let mut open = Vec::new();
-        for line in text.lines() {
-            if let Some(caps) = port_re.captures(line)
-                && let Ok(p) = caps[1].parse::<u16>()
-            {
-                open.push(p);
-            }
-        }
-        Ok(open)
+    async fn scan_extended_ports_batch(&self, ips: &[IpAddr]) -> Result<HashMap<IpAddr, Vec<u16>>> {
+        self.run_nmap_ports(ips, None).await
     }
 }

@@ -154,15 +154,16 @@ impl MarkdownSummaryGenerator {
 
         // 4. Detailed Device Inventory Table
         doc.push_str("## 4. Comprehensive Device Inventory\n\n");
-        doc.push_str("| # | Device Name | Category | Model / Hardware | Subnet | IP Address | MAC Address & Vendor | Open Ports | Role / Notes |\n");
-        doc.push_str("|---|---|---|---|---|---|---|---|---|\n");
+        doc.push_str("| # | Device Name | Category | Confidence | Model / Hardware | Subnet | IP Address | MAC Address & Vendor | Open Ports | Role / Notes |\n");
+        doc.push_str("|---|---|---|---|---|---|---|---|---|---|\n");
 
         for (idx, dev) in topology.devices.iter().enumerate() {
             let mac_str = dev.mac.as_deref().unwrap_or("N/A");
             let vendor_str = dev.vendor.as_deref().unwrap_or("Unknown");
             let model_str = dev.model.as_deref().unwrap_or("Generic Hardware");
+            let confidence_str = format!("{}% ({})", dev.certainty, dev.identification_status);
             let ports_str = if dev.open_ports.is_empty() {
-                "ICMP / Client".to_string()
+                "Not Probed / None".to_string()
             } else {
                 dev.open_ports
                     .iter()
@@ -173,10 +174,11 @@ impl MarkdownSummaryGenerator {
             let notes_str = dev.notes.as_deref().unwrap_or("-");
 
             doc.push_str(&format!(
-                "| **{}** | **{}** | {} | {} | {} | `{}` | `{}` ({}) | `{}` | {} |\n",
+                "| **{}** | **{}** | {} | {} | {} | {} | `{}` | `{}` ({}) | `{}` | {} |\n",
                 idx + 1,
                 dev.device_name,
                 dev.device_type.category_badge(),
+                confidence_str,
                 model_str,
                 dev.network_zone,
                 dev.ip,

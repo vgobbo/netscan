@@ -25,19 +25,16 @@ impl HybridScanner {
 
 #[async_trait]
 impl NetworkScanner for HybridScanner {
-    async fn scan_network(&self, targets: &[IpNetwork]) -> Result<Vec<Device>> {
-        info!("Running Hybrid scanning engine (Native async + Nmap)...");
+    async fn enumerate_hosts(&self, targets: &[IpNetwork]) -> Result<Vec<Device>> {
+        info!("Running Hybrid host enumeration (Native async + Nmap -sn)...");
 
-        // 1. Run Native async sweep
-        let native_devices = self.native.scan_network(targets).await?;
-
-        // 2. If Nmap is available, run Nmap to discover any hosts that drop ICMP/standard TCP
+        let native_devices = self.native.enumerate_hosts(targets).await?;
         let mut device_map: HashMap<IpAddr, Device> =
             native_devices.into_iter().map(|d| (d.ip, d)).collect();
 
         if NmapScanner::is_available().await {
-            info!("Enriching host discovery with Nmap backend...");
-            if let Ok(nmap_devices) = self.nmap.scan_network(targets).await {
+            info!("Enriching host enumeration with Nmap (-sn)...");
+            if let Ok(nmap_devices) = self.nmap.enumerate_hosts(targets).await {
                 for ndev in nmap_devices {
                     let entry = device_map.entry(ndev.ip).or_insert_with(|| ndev.clone());
                     if entry.mac.is_none() && ndev.mac.is_some() {
@@ -45,6 +42,9 @@ impl NetworkScanner for HybridScanner {
                     }
                     if entry.hostname.is_none() && ndev.hostname.is_some() {
                         entry.hostname = ndev.hostname;
+                    }
+                    if entry.vendor.is_none() && ndev.vendor.is_some() {
+                        entry.vendor = ndev.vendor;
                     }
                     for port in ndev.open_ports {
                         if !entry.open_ports.contains(&port) {
@@ -60,7 +60,29 @@ impl NetworkScanner for HybridScanner {
         Ok(all_devices)
     }
 
-    async fn scan_ports(&self, ip: IpAddr, ports: &[u16]) -> Result<Vec<u16>> {
-        self.native.scan_ports(ip, ports).await
+    async fn scan_ports_batch(
+        &self,
+        ips: &[IpAddr],
+        ports: &[u16],
+    ) -> Result<HashMap<IpAddr, Vec<u16>>> {
+        self.native.scan_ports_batch(ips, ports).await
+    }
+
+    async fn scan_extended_ports_batch(&self, ips: &[IpAddr]) -> Result<HashMap<IpAddr, Vec<u16>>> {
+        let mut merged = self.native.scan_extended_ports_batch(ips).await?;
+        if NmapScanner::is_available().await
+            && let Ok(nmap_ports) = self.nmap.scan_extended_ports_batch(ips).await
+        {
+            for (ip, ports) in nmap_ports {
+                let entry = merged.entry(ip).or_default();
+                for p in ports {
+                    if !entry.contains(&p) {
+                        entry.push(p);
+                    }
+                }
+                entry.sort_unstable();
+            }
+        }
+        Ok(merged)
     }
 }

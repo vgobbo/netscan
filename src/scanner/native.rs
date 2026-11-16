@@ -1,9 +1,9 @@
 use crate::model::Device;
-use crate::net::ArpReader;
-use crate::scanner::{DEFAULT_PROBE_PORTS, NetworkScanner};
+use crate::scanner::{EXTENDED_PROBE_PORTS, NetworkScanner};
 use anyhow::Result;
 use async_trait::async_trait;
 use ipnetwork::IpNetwork;
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,10 +35,7 @@ impl NativeScanner {
             .status()
             .await;
 
-        match res {
-            Ok(status) => status.success(),
-            Err(_) => false,
-        }
+        matches!(res, Ok(status) if status.success())
     }
 
     /// Tests if a TCP port is open on the target host.
@@ -50,8 +47,8 @@ impl NativeScanner {
         )
     }
 
-    /// Resolves the hostname for a given IP address via getent hosts.
-    async fn resolve_hostname(ip: IpAddr) -> Option<String> {
+    /// Resolves the hostname for a given IP address via `getent hosts`.
+    pub async fn resolve_hostname(ip: IpAddr) -> Option<String> {
         let output = Command::new("getent")
             .args(["hosts", &ip.to_string()])
             .output()
@@ -73,42 +70,40 @@ impl NativeScanner {
 
 #[async_trait]
 impl NetworkScanner for NativeScanner {
-    async fn scan_network(&self, targets: &[IpNetwork]) -> Result<Vec<Device>> {
-        info!("Starting native async host discovery across target networks...");
+    async fn enumerate_hosts(&self, targets: &[IpNetwork]) -> Result<Vec<Device>> {
+        info!("Starting native async host enumeration across target networks...");
         let sem = Arc::new(Semaphore::new(self.concurrency));
-        let probe_timeout = Duration::from_millis(self.timeout_ms);
 
         let mut ip_list = Vec::new();
         for target in targets {
             let zone = target.to_string();
 
             for ip in target.iter() {
-                // Skip broadcast and network IDs for /24 subnets
                 if let IpAddr::V4(v4) = ip {
                     let octets = v4.octets();
                     if octets[3] == 0 || octets[3] == 255 {
                         continue;
                     }
                 }
-                ip_list.push((ip, zone.to_string()));
+                ip_list.push((ip, zone.clone()));
             }
         }
 
-        // Phase 1: Ping sweep and initial port probe across all candidate IPs
         let mut sweep_tasks = Vec::new();
         for (ip, zone) in ip_list {
             let permit = sem.clone();
             sweep_tasks.push(tokio::spawn(async move {
                 let _p = permit.acquire().await;
-                // Ping first
                 if Self::is_host_alive_ping(ip).await {
-                    return Some((ip, zone));
+                    return Some(Device::new(ip, zone));
                 }
 
-                // If ICMP ping is blocked or ignored, check critical common ports
+                // Fallback TCP knock if ICMP ping is ignored
                 for &port in &[80, 443, 8080, 22, 8008, 8883] {
                     if Self::test_tcp_port(ip, port, Duration::from_millis(400)).await {
-                        return Some((ip, zone));
+                        let mut dev = Device::new(ip, zone);
+                        dev.open_ports.push(port);
+                        return Some(dev);
                     }
                 }
 
@@ -116,70 +111,61 @@ impl NetworkScanner for NativeScanner {
             }));
         }
 
-        let mut alive_hosts = Vec::new();
-        for t in sweep_tasks {
-            if let Ok(Some((ip, zone))) = t.await {
-                alive_hosts.push((ip, zone));
-            }
-        }
-
-        info!(
-            "Discovered {} active hosts. Reading ARP table and fingerprinting ports...",
-            alive_hosts.len()
-        );
-
-        // Refresh ARP table to capture hardware MAC addresses
-        let arp_table = ArpReader::get_table();
-
-        // Phase 2: Concurrent port scanning and hostname resolution on alive hosts
-        let mut dev_tasks = Vec::new();
-        for (ip, zone) in alive_hosts {
-            let permit = sem.clone();
-            let mac = arp_table.get(&ip).cloned();
-
-            dev_tasks.push(tokio::spawn(async move {
-                let _p = permit.acquire().await;
-                let hostname = Self::resolve_hostname(ip).await;
-
-                // Port scan DEFAULT_PROBE_PORTS
-                let mut open_ports = Vec::new();
-                for &port in DEFAULT_PROBE_PORTS {
-                    if Self::test_tcp_port(ip, port, probe_timeout).await {
-                        open_ports.push(port);
-                    }
-                }
-
-                let mut device = Device::new(ip, zone);
-                device.mac = mac;
-                device.hostname = hostname.clone();
-                if let Some(h) = hostname {
-                    device.device_name = h;
-                }
-                device.open_ports = open_ports;
-                device
-            }));
-        }
-
         let mut devices = Vec::new();
-        for t in dev_tasks {
-            if let Ok(dev) = t.await {
+        for t in sweep_tasks {
+            if let Ok(Some(dev)) = t.await {
                 devices.push(dev);
             }
         }
 
-        // Sort devices by IP address
         devices.sort_by_key(|a| a.ip);
+        info!(
+            "Native enumeration discovered {} active host(s)",
+            devices.len()
+        );
         Ok(devices)
     }
 
-    async fn scan_ports(&self, ip: IpAddr, ports: &[u16]) -> Result<Vec<u16>> {
-        let probe_timeout = Duration::from_millis(self.timeout_ms);
-        let mut open = Vec::new();
-        for &port in ports {
-            if Self::test_tcp_port(ip, port, probe_timeout).await {
-                open.push(port);
+    async fn scan_ports_batch(
+        &self,
+        ips: &[IpAddr],
+        ports: &[u16],
+    ) -> Result<HashMap<IpAddr, Vec<u16>>> {
+        let mut results = HashMap::new();
+        if ips.is_empty() || ports.is_empty() {
+            return Ok(results);
+        }
+
+        let sem = Arc::new(Semaphore::new(self.concurrency));
+        let probe_timeout = Duration::from_millis(self.timeout_ms.min(600));
+        let mut tasks = Vec::new();
+
+        for &ip in ips {
+            for &port in ports {
+                let permit = sem.clone();
+                tasks.push(tokio::spawn(async move {
+                    let _p = permit.acquire().await;
+                    let open = Self::test_tcp_port(ip, port, probe_timeout).await;
+                    (ip, port, open)
+                }));
             }
         }
-        Ok(open)
+
+        for t in tasks {
+            if let Ok((ip, port, true)) = t.await {
+                results.entry(ip).or_insert_with(Vec::new).push(port);
+            }
+        }
+
+        for list in results.values_mut() {
+            list.sort_unstable();
+            list.dedup();
+        }
+
+        Ok(results)
+    }
+
+    async fn scan_extended_ports_batch(&self, ips: &[IpAddr]) -> Result<HashMap<IpAddr, Vec<u16>>> {
+        self.scan_ports_batch(ips, EXTENDED_PROBE_PORTS).await
     }
 }

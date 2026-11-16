@@ -103,7 +103,13 @@ pub struct OuiMatcher;
 
 impl OuiMatcher {
     /// Look up the vendor name for a given MAC address string (e.g. "6e:63:f8:3f:a1:bb").
+    #[allow(dead_code)]
     pub fn lookup(mac: &str) -> Option<String> {
+        Self::lookup_with_custom(mac, &[])
+    }
+
+    /// Look up the vendor name, checking custom TOML OUI overrides before built-in and system databases.
+    pub fn lookup_with_custom(mac: &str, custom: &[(String, String)]) -> Option<String> {
         let clean: String = mac
             .chars()
             .filter(|c| c.is_ascii_hexdigit())
@@ -113,6 +119,10 @@ impl OuiMatcher {
 
         if clean.len() < 6 {
             return None;
+        }
+
+        if let Some((_, vendor)) = custom.iter().find(|(prefix, _)| prefix == &clean) {
+            return Some(vendor.clone());
         }
 
         let db = OUI_DATABASE.get_or_init(build_builtin_oui);

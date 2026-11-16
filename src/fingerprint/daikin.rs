@@ -1,3 +1,4 @@
+use crate::fingerprint::findings::HostFindings;
 use reqwest::Client;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -21,25 +22,52 @@ pub struct DaikinInfo {
     pub adapter_kind: Option<String>,
 }
 
+impl DaikinInfo {
+    /// Stores Daikin metadata in the host findings attribute map for TOML rule matching.
+    pub fn populate_findings(&self, findings: &mut HostFindings) {
+        if let Some(v) = &self.name {
+            findings
+                .attributes
+                .insert("daikin.name".to_string(), v.clone());
+        }
+        if let Some(v) = &self.unit_type {
+            findings
+                .attributes
+                .insert("daikin.unit_type".to_string(), v.clone());
+        }
+        if let Some(v) = &self.cdev {
+            findings
+                .attributes
+                .insert("daikin.cdev".to_string(), v.clone());
+        }
+        if let Some(v) = &self.protocol {
+            findings
+                .attributes
+                .insert("daikin.protocol".to_string(), v.clone());
+        }
+        if let Some(v) = &self.firmware_version {
+            findings
+                .attributes
+                .insert("daikin.ver".to_string(), v.clone());
+        }
+        if let Some(v) = &self.ssid {
+            findings
+                .attributes
+                .insert("daikin.ssid".to_string(), v.clone());
+        }
+        if let Some(v) = &self.adapter_kind {
+            findings
+                .attributes
+                .insert("daikin.adp_kind".to_string(), v.clone());
+        }
+    }
+}
+
 pub struct DaikinProber;
 
 impl DaikinProber {
-    /// Probes a host for Daikin Wi-Fi adapter metadata via UDP discovery (port 30050)
-    /// and falls back to the legacy HTTP `/common/basic_info` endpoint if port 80 is open.
-    pub async fn probe(client: &Client, ip: IpAddr, open_ports: &[u16]) -> Option<DaikinInfo> {
-        if let Some(info) = Self::probe_udp(ip).await {
-            return Some(info);
-        }
-
-        if open_ports.contains(&80) {
-            return Self::probe_http(client, ip).await;
-        }
-
-        None
-    }
-
     /// Sends a read-only `DAIKIN_UDP/common/basic_info` probe to UDP port 30050.
-    async fn probe_udp(ip: IpAddr) -> Option<DaikinInfo> {
+    pub async fn probe_udp(ip: IpAddr) -> Option<DaikinInfo> {
         let bind_addr = match ip {
             IpAddr::V4(_) => "0.0.0.0:0",
             IpAddr::V6(_) => "[::]:0",
@@ -65,7 +93,7 @@ impl DaikinProber {
     }
 
     /// Queries the legacy Daikin `/common/basic_info` HTTP endpoint on port 80.
-    async fn probe_http(client: &Client, ip: IpAddr) -> Option<DaikinInfo> {
+    pub async fn probe_http(client: &Client, ip: IpAddr) -> Option<DaikinInfo> {
         let url = format!("http://{}/common/basic_info", ip);
         let resp = client
             .get(&url)

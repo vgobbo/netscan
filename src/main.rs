@@ -17,6 +17,7 @@ mod upstream;
 
 use cli::{BackendChoice, Cli, Commands, ScanArgs};
 use fingerprint::FingerprintPipeline;
+use fingerprint::rule_schema::CompiledRuleset;
 use model::NetworkTopology;
 use net::InterfaceDetector;
 use report::{HtmlViewerGenerator, JsonGenerator, MarkdownSummaryGenerator, MermaidGenerator};
@@ -101,7 +102,25 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
     let target_strs: Vec<String> = targets.iter().map(|t| t.to_string()).collect();
     info!("Target networks to scan: {}", target_strs.join(", "));
 
-    // 5. Initialize Scanner Engine
+    // 5. Load TOML Fingerprinting Ruleset
+    let ruleset = match &args.rules {
+        Some(path) => {
+            info!(
+                "Loading custom fingerprinting rules from {}",
+                path.display()
+            );
+            CompiledRuleset::from_file(path)?
+        }
+        None => CompiledRuleset::from_embedded()?,
+    };
+    info!(
+        "Loaded {} fingerprinting rule(s) (schema v{}, full_scan={})",
+        ruleset.rules.len(),
+        ruleset.schema_version,
+        args.full
+    );
+
+    // 6. Initialize Scanner Engine
     let scanner: Box<dyn NetworkScanner> = match args.backend {
         BackendChoice::Native => {
             info!("Scanner backend: Native Tokio Async Engine");
@@ -117,11 +136,11 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
         }
     };
 
-    // 6. Execute Network Scan
-    let mut devices = scanner.scan_network(&targets).await?;
-    info!("Discovered {} active host(s)", devices.len());
+    // 7. Execute Host Enumeration
+    let mut devices = scanner.enumerate_hosts(&targets).await?;
+    info!("Enumerated {} active host(s)", devices.len());
 
-    // 7. Flag Discovered Gateways
+    // 8. Flag Discovered Gateways
     for dev in &mut devices {
         if Some(dev.ip) == default_gateway
             || upstream_path.hops.iter().any(|h| h.ip == Some(dev.ip))
@@ -130,11 +149,11 @@ async fn run_scan(args: ScanArgs) -> Result<()> {
         }
     }
 
-    // 8. Device Fingerprinting Pipeline
-    info!("Fingerprinting devices via HTTP, Google Cast, and MAC OUI...");
-    let pipeline = FingerprintPipeline::new(args.concurrency);
-    pipeline.enrich_all(&mut devices).await;
-    info!("Device fingerprinting completed");
+    // 9. Staged Discovery & Fingerprinting Pipeline
+    info!("Running staged discovery and TOML rule fingerprinting...");
+    let pipeline = FingerprintPipeline::new(args.concurrency, ruleset, args.full);
+    let devices = pipeline.run(&devices, scanner.as_ref()).await;
+    info!("Staged fingerprinting completed");
 
     // 9. Build Abstract In-Memory Topology Model
     let local_subnets = targets.iter().map(|t| t.to_string()).collect();

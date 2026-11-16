@@ -4,6 +4,27 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
 
+/// Outcome of the staged fingerprinting rule evaluation for a device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum IdentificationStatus {
+    Conclusive,
+    Ambiguous,
+    BestGuess,
+    #[default]
+    Unidentified,
+}
+
+impl fmt::Display for IdentificationStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Conclusive => write!(f, "Conclusive"),
+            Self::Ambiguous => write!(f, "Ambiguous"),
+            Self::BestGuess => write!(f, "Best Guess"),
+            Self::Unidentified => write!(f, "Unidentified"),
+        }
+    }
+}
+
 /// Categorization of discovered devices for topology visualization and reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum DeviceType {
@@ -96,6 +117,9 @@ pub struct Device {
     pub http_server: Option<String>,
     pub notes: Option<String>,
     pub is_gateway: bool,
+    pub certainty: u8,
+    pub identification_status: IdentificationStatus,
+    pub matched_rules: Vec<String>,
     pub attributes: BTreeMap<String, String>,
 }
 
@@ -115,6 +139,9 @@ impl Device {
             http_server: None,
             notes: None,
             is_gateway: false,
+            certainty: 0,
+            identification_status: IdentificationStatus::Unidentified,
+            matched_rules: Vec::new(),
             attributes: BTreeMap::new(),
         }
     }

@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::path::PathBuf;
 
 /// netscan: Automated Network Topology Scanner and Documentation Tool
 #[derive(Parser, Debug)]
@@ -62,6 +63,14 @@ pub struct ScanArgs {
     /// Skip tracing upstream hops to the public Internet
     #[arg(long)]
     pub skip_upstream: bool,
+
+    /// Path to a custom TOML fingerprinting rules file (overrides embedded default)
+    #[arg(long)]
+    pub rules: Option<PathBuf>,
+
+    /// Run all scanner stages on every host even after conclusive identification
+    #[arg(long)]
+    pub full: bool,
 
     /// Enable verbose / debug logging
     #[arg(short, long)]

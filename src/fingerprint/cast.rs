@@ -1,3 +1,4 @@
+use crate::fingerprint::findings::HostFindings;
 use reqwest::Client;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -6,8 +7,21 @@ use tracing::debug;
 #[derive(Debug, Clone)]
 pub struct GoogleCastInfo {
     pub name: String,
-    #[allow(dead_code)]
     pub model_name: Option<String>,
+}
+
+impl GoogleCastInfo {
+    /// Stores Cast metadata in the host findings attribute map for TOML rule matching.
+    pub fn populate_findings(&self, findings: &mut HostFindings) {
+        findings
+            .attributes
+            .insert("cast.name".to_string(), self.name.clone());
+        if let Some(model) = &self.model_name {
+            findings
+                .attributes
+                .insert("cast.model_name".to_string(), model.clone());
+        }
+    }
 }
 
 pub struct CastProber;

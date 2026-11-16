@@ -1,0 +1,984 @@
+# Declarative device fingerprinting ruleset for netscan.
+# Rules are evaluated from highest to lowest priority after each scanner stage.
+# A host becomes conclusive when a single `conclusive = true` rule matches at the
+# highest matched priority tier and no higher-priority conclusive rule remains
+# eligible in a later scanner stage.
+
+[meta]
+schema_version = 1
+
+# Additional OUI vendor prefixes merged with built-in OUI database
+[[oui]]
+prefix = "24CD8D"
+vendor = "Murata Manufacturing"
+
+[[oui]]
+prefix = "FC84A7"
+vendor = "Murata Manufacturing"
+
+# ==============================================================================
+# 1. Google Cast Devices (Chromecast, Google TV, Nest Audio, Google Home)
+# ==============================================================================
+
+[[rule]]
+id = "google_cast_tv"
+description = "Google TV / Chromecast streaming device via Cast eureka_info"
+priority = 100
+conclusive = true
+requires_scanners = ["api_protocols"]
+
+[rule.match]
+attributes = { "cast.name" = { regex = "(tv|streamer)" } }
+
+[rule.output]
+device_type = "Entertainment"
+device_name = "{cast.name}"
+model = "Google TV / Chromecast Streaming Device"
+notes = "Media streaming device with Cast protocol"
+
+[[rule]]
+id = "google_cast_speaker"
+description = "Google Nest / Home smart speaker via Cast eureka_info"
+priority = 100
+conclusive = true
+requires_scanners = ["api_protocols"]
+
+[rule.match]
+attributes = { "cast.name" = { regex = "(speaker|audio)" } }
+
+[rule.output]
+device_type = "Entertainment"
+device_name = "{cast.name}"
+model = "Google Nest / Home Smart Speaker"
+notes = "Voice assistant and multiroom audio speaker"
+
+[[rule]]
+id = "google_cast_nest_host"
+description = "Google Nest Cast device matched by Cast name and Nest hostname"
+priority = 98
+conclusive = true
+requires_scanners = ["api_protocols"]
+
+[rule.match]
+attributes_present = ["cast.name"]
+hostname_contains = ["nest"]
+
+[rule.output]
+device_type = "Entertainment"
+device_name = "{cast.name}"
+model = "Google Nest / Home Smart Speaker"
+notes = "Voice assistant and multiroom audio speaker"
+
+[[rule]]
+id = "google_cast_generic"
+description = "Generic Google Cast multimedia receiver"
+priority = 95
+conclusive = true
+requires_scanners = ["api_protocols"]
+
+[rule.match]
+attributes_present = ["cast.name"]
+
+[rule.output]
+device_type = "Entertainment"
+device_name = "{cast.name}"
+model = "Google Cast Device"
+notes = "Cast-enabled multimedia receiver"
+
+[[rule]]
+id = "google_nest_hostname_fallback"
+description = "Google Nest speaker identified via hostname when Cast port is unreachable"
+priority = 70
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["google"]
+hostname_contains = ["nest"]
+
+[rule.output]
+device_type = "Entertainment"
+device_name = "Google Nest Speaker"
+model = "Google Nest / Home Smart Speaker"
+notes = "Voice assistant and multiroom audio speaker"
+
+# ==============================================================================
+# 2. HomeWizard Smart Energy Devices
+# ==============================================================================
+
+[[rule]]
+id = "homewizard_p1_meter"
+description = "HomeWizard P1 smart meter reader"
+priority = 100
+conclusive = true
+requires_scanners = ["api_protocols"]
+
+[rule.match]
+attributes_present = ["homewizard.product_name"]
+attributes = { "homewizard.product_type" = { contains = "P1" } }
+
+[rule.output]
+device_type = "EnergySolar"
+device_name = "HomeWizard P1 Meter"
+model = "HomeWizard {homewizard.product_name} ({homewizard.product_type})"
+notes = "Connected to utility smart meter P1 interface"
+
+[[rule]]
+id = "homewizard_energy_socket"
+description = "HomeWizard Wi-Fi energy socket or meter"
+priority = 95
+conclusive = true
+requires_scanners = ["api_protocols"]
+
+[rule.match]
+attributes_present = ["homewizard.product_name"]
+
+[rule.output]
+device_type = "EnergySolar"
+device_name = "HomeWizard {homewizard.product_name}"
+model = "HomeWizard {homewizard.product_name} ({homewizard.product_type|Unknown})"
+notes = "Smart power plug with energy metering"
+
+# ==============================================================================
+# 3. Daikin HVAC / Air Conditioning Units
+# ==============================================================================
+
+[[rule]]
+id = "daikin_room_ac"
+description = "Daikin Room Air Conditioner via UDP discovery or HTTP basic_info"
+priority = 100
+conclusive = true
+requires_scanners = ["udp_discovery", "api_protocols"]
+
+[rule.match]
+attributes_present = ["daikin.name"]
+attributes = { "daikin.cdev" = { equals = "RA" } }
+
+[rule.output]
+device_type = "Climate"
+device_name = "Daikin AC - {daikin.name}"
+vendor = "Daikin"
+model = "Daikin Room Air Conditioner ({daikin.protocol|Wi-Fi} Wi-Fi Adapter)"
+notes = "Smart HVAC / air conditioning unit (fw {daikin.ver|unknown}, SSID {daikin.ssid|N/A})"
+
+[[rule]]
+id = "daikin_hvac_named"
+description = "Named Daikin HVAC unit via UDP discovery or HTTP basic_info"
+priority = 95
+conclusive = true
+requires_scanners = ["udp_discovery", "api_protocols"]
+
+[rule.match]
+attributes_present = ["daikin.name", "daikin.unit_type"]
+
+[rule.output]
+device_type = "Climate"
+device_name = "Daikin AC - {daikin.name}"
+vendor = "Daikin"
+model = "Daikin HVAC Unit ({daikin.protocol|Wi-Fi} Wi-Fi Adapter)"
+notes = "Smart HVAC / air conditioning unit (fw {daikin.ver|unknown}, SSID {daikin.ssid|N/A})"
+
+[[rule]]
+id = "daikin_hvac_unnamed"
+description = "Unnamed Daikin HVAC unit via UDP discovery or HTTP basic_info"
+priority = 90
+conclusive = true
+requires_scanners = ["udp_discovery", "api_protocols"]
+
+[rule.match]
+attributes_present = ["daikin.unit_type"]
+
+[rule.output]
+device_type = "Climate"
+device_name = "Daikin Air Conditioner"
+vendor = "Daikin"
+model = "Daikin HVAC Unit ({daikin.protocol|Wi-Fi} Wi-Fi Adapter)"
+notes = "Smart HVAC / air conditioning unit (fw {daikin.ver|unknown}, SSID {daikin.ssid|N/A})"
+
+[[rule]]
+id = "daikin_http_oss_notice"
+description = "Daikin Wi-Fi adapter identified by embedded open-source notice page"
+priority = 85
+conclusive = true
+requires_scanners = ["http"]
+
+[rule.match]
+http_body_all = ["<hrml lang=\"en\">", "This software is included following open source software."]
+
+[rule.output]
+device_type = "Climate"
+device_name = "Daikin Air Conditioner"
+vendor = "Daikin"
+model = "Daikin Smart HVAC / Wi-Fi Adapter"
+notes = "Smart HVAC / air conditioning unit"
+
+[[rule]]
+id = "daikin_vendor_match"
+description = "Daikin device matched via OUI vendor"
+priority = 80
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["daikin"]
+
+[rule.output]
+device_type = "Climate"
+device_name = "Daikin Air Conditioner"
+vendor = "Daikin"
+model = "Daikin Smart HVAC / Wi-Fi Adapter"
+notes = "Smart HVAC / air conditioning unit"
+
+[[rule]]
+id = "daikin_hostname_match"
+description = "Daikin device matched via hostname"
+priority = 79
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["daikin"]
+
+[rule.output]
+device_type = "Climate"
+device_name = "Daikin Air Conditioner"
+vendor = "Daikin"
+model = "Daikin Smart HVAC / Wi-Fi Adapter"
+notes = "Smart HVAC / air conditioning unit"
+
+# ==============================================================================
+# 4. Ubiquiti / UniFi Network Gear & Surveillance
+# ==============================================================================
+
+[[rule]]
+id = "unifi_os_manifest"
+description = "UniFi Gateway / Controller identified via UNIFI_OS_MANIFEST"
+priority = 100
+conclusive = true
+requires_scanners = ["http"]
+
+[rule.match]
+http_body_contains = ["UNIFI_OS_MANIFEST"]
+
+[[rule.extract]]
+source = "http_body"
+pattern = 'window\.UNIFI_OS_MANIFEST\s*=\s*\{[^}]*"shortName"\s*:\s*"([^"]+)"'
+target = "unifi.model"
+
+[rule.output]
+device_type = "Router"
+device_name = "UniFi {unifi.model|Gateway / Controller}"
+vendor = "Ubiquiti"
+model = "Ubiquiti {unifi.model|UniFi Routing Hardware}"
+notes = "Security gateway and network controller"
+
+[[rule]]
+id = "unifi_protect_doorbell"
+description = "Ubiquiti UniFi Protect Doorbell"
+priority = 100
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["ubiquiti"]
+hostname_contains = ["doorbell"]
+
+[rule.output]
+device_type = "Surveillance"
+device_name = "UniFi Protect Doorbell"
+model = "Ubiquiti UniFi Protect Doorbell"
+notes = "Smart video doorbell and intercom"
+
+[[rule]]
+id = "unifi_protect_chime_host"
+description = "Ubiquiti UniFi Protect Smart Chime by hostname"
+priority = 98
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["ubiquiti"]
+hostname_contains = ["chime", "up-chime", "espressif"]
+
+[rule.output]
+device_type = "Surveillance"
+device_name = "UniFi Protect Smart Chime"
+model = "Ubiquiti UP-Chime"
+notes = "Wireless smart indoor chime"
+
+[[rule]]
+id = "unifi_protect_chime_ports"
+description = "Ubiquiti UniFi Protect Smart Chime by port profile"
+priority = 90
+conclusive = true
+requires_scanners = ["ports_fast"]
+
+[rule.match]
+vendor_contains = ["ubiquiti"]
+is_gateway = false
+ports_all = [8080]
+ports_none = [443]
+
+[rule.output]
+device_type = "Surveillance"
+device_name = "UniFi Protect Smart Chime"
+model = "Ubiquiti UP-Chime"
+notes = "Wireless smart indoor chime"
+
+[[rule]]
+id = "unifi_gateway_router"
+description = "Ubiquiti UniFi Gateway / Controller"
+priority = 70
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["ubiquiti"]
+is_gateway = true
+
+[rule.output]
+device_type = "Router"
+device_name = "UniFi Gateway / Controller"
+model = "Ubiquiti UniFi Routing Hardware"
+notes = "Primary security gateway, router, and controller"
+
+[[rule]]
+id = "unifi_controller_https"
+description = "Ubiquiti UniFi Controller on HTTPS ports"
+priority = 65
+conclusive = true
+requires_scanners = ["ports_fast"]
+
+[rule.match]
+vendor_contains = ["ubiquiti"]
+ports_any = [443, 8443]
+
+[rule.output]
+device_type = "Router"
+device_name = "UniFi Gateway / Controller"
+model = "Ubiquiti UniFi Routing Hardware"
+notes = "Primary security gateway, router, and controller"
+
+# ==============================================================================
+# 5. Zyxel / ISP CPE Modems
+# ==============================================================================
+
+[[rule]]
+id = "zyxel_http_configurator"
+description = "Zyxel ISP Gateway / Modem via HTTP configurator page"
+priority = 95
+conclusive = true
+requires_scanners = ["http"]
+
+[rule.match]
+http_body_contains = [
+    "FaviconZyxel.png",
+    "Welcome to the Web-Based Configurator",
+    "zyxel-icon",
+]
+
+[rule.output]
+device_type = "Router"
+device_name = "Zyxel ISP Gateway / Modem"
+model = "Zyxel VMG/EX Series Broadband Gateway"
+notes = "Broadband modem and optical network gateway"
+
+[[rule]]
+id = "zyxel_vendor"
+description = "Zyxel device matched via OUI vendor"
+priority = 85
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["zyxel"]
+
+[rule.output]
+device_type = "Router"
+device_name = "Zyxel ISP Gateway / Modem"
+model = "Zyxel VMG/EX Series Broadband Gateway"
+notes = "Broadband modem and optical network gateway"
+
+[[rule]]
+id = "zyxel_hostname"
+description = "Zyxel device matched via hostname"
+priority = 84
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["zyxel"]
+
+[rule.output]
+device_type = "Router"
+device_name = "Zyxel ISP Gateway / Modem"
+model = "Zyxel VMG/EX Series Broadband Gateway"
+notes = "Broadband modem and optical network gateway"
+
+# ==============================================================================
+# 6. ASUS Networking Hardware (AiMesh Master / AP / Satellite Nodes)
+# ==============================================================================
+
+[[rule]]
+id = "asus_aimesh_satellite"
+description = "ASUS AiMesh satellite node via ASUSWRT web interface"
+priority = 96
+conclusive = true
+requires_scanners = ["http"]
+
+[rule.match]
+http_body_regex = "(Main_Login\\.asp|router\\.asus\\.com)[\\s\\S]*(isAMeshRE\\s*=\\s*\\('1'\\s*==\\s*'1'\\)|AiMesh router detect)"
+
+[rule.output]
+device_type = "AccessPoint"
+device_name = "ASUS AiMesh Satellite Node"
+model = "ASUS Wi-Fi 6 Mesh Node"
+notes = "Wireless mesh node extending property coverage"
+
+[[rule]]
+id = "asus_aimesh_master"
+description = "ASUS Wireless Access Point / Master AP via ASUSWRT web interface"
+priority = 92
+conclusive = true
+requires_scanners = ["http"]
+
+[rule.match]
+http_body_contains = ["Main_Login.asp", "router.asus.com"]
+
+[rule.output]
+device_type = "AccessPoint"
+device_name = "ASUS Wireless Access Point / Master AP"
+model = "ASUS RT Series Wi-Fi 6 AP"
+notes = "Operating in AP mode; AiMesh master controller"
+
+[[rule]]
+id = "asus_ap_hostname"
+description = "ASUS RT-AX / AiMesh access point by hostname"
+priority = 85
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["rt-ax", "aimesh"]
+
+[rule.output]
+device_type = "AccessPoint"
+device_name = "ASUS Wireless Access Point"
+model = "ASUS Wi-Fi 6 AP / Mesh Node"
+notes = "Wireless access point or mesh satellite"
+
+# ==============================================================================
+# 7. Network Switches
+# ==============================================================================
+
+[[rule]]
+id = "netgear_gs305_switch"
+description = "Netgear GS305 series managed switch"
+priority = 100
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["gs305"]
+
+[rule.output]
+device_type = "Switch"
+device_name = "Netgear Managed Switch"
+model = "Netgear Smart Managed Gigabit PoE+ Switch"
+notes = "Layer 2 Ethernet switch distributing wired connectivity"
+
+[[rule]]
+id = "netgear_switch_generic"
+description = "Netgear switch with web management port"
+priority = 85
+conclusive = true
+requires_scanners = ["ports_fast"]
+
+[rule.match]
+vendor_contains = ["netgear"]
+ports_any = [80]
+
+[rule.output]
+device_type = "Switch"
+device_name = "Netgear Managed Switch"
+model = "Netgear Smart Managed Gigabit PoE+ Switch"
+notes = "Layer 2 Ethernet switch distributing wired connectivity"
+
+[[rule]]
+id = "cisco_switch"
+description = "Cisco non-gateway Ethernet switch"
+priority = 85
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["cisco"]
+is_gateway = false
+
+[rule.output]
+device_type = "Switch"
+device_name = "Cisco Network Switch"
+model = "Cisco Ethernet Switch"
+
+# ==============================================================================
+# 8. Smart Home Hubs & Bridges
+# ==============================================================================
+
+[[rule]]
+id = "philips_hue_bridge_vendor"
+description = "Philips Hue Zigbee Bridge via Signify/Philips OUI"
+priority = 100
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["signify", "philips"]
+
+[rule.output]
+device_type = "SmartHomeHub"
+device_name = "Philips Hue Bridge"
+model = "Philips Hue Zigbee Bridge"
+notes = "Zigbee-to-Ethernet bridge controlling indoor lighting"
+
+[[rule]]
+id = "philips_hue_bridge_host"
+description = "Philips Hue Zigbee Bridge via hostname"
+priority = 98
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["ecb5fa", "hue"]
+
+[rule.output]
+device_type = "SmartHomeHub"
+device_name = "Philips Hue Bridge"
+model = "Philips Hue Zigbee Bridge"
+notes = "Zigbee-to-Ethernet bridge controlling indoor lighting"
+
+[[rule]]
+id = "xsense_sbs50_gateway"
+description = "X-Sense SBS50 smart sensor base station"
+priority = 100
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["sbs50", "x-sense"]
+
+[rule.output]
+device_type = "SmartHomeHub"
+device_name = "X-Sense Smart Gateway"
+model = "X-Sense SBS50 Base Station"
+notes = "RF bridge for smoke, CO, water leak, and thermo sensors"
+
+# ==============================================================================
+# 9. Solar Inverters & Energy Loggers
+# ==============================================================================
+
+[[rule]]
+id = "elinter_solar_http"
+description = "Solar PV inverter Wi-Fi stick via HTTP firmware signature"
+priority = 95
+conclusive = true
+requires_scanners = ["http"]
+
+[rule.match]
+http_body_contains = ["Inverter firmware", "staset.cgi"]
+
+[rule.output]
+device_type = "EnergySolar"
+device_name = "Solar Inverter Datalogger"
+model = "Solar PV Inverter Wi-Fi Stick"
+notes = "Solar PV telemetry and monitoring datalogger"
+
+[[rule]]
+id = "elinter_solar_mongoose"
+description = "Solar PV inverter Wi-Fi stick running Mongoose HTTP server"
+priority = 90
+conclusive = true
+requires_scanners = ["http"]
+
+[rule.match]
+http_server_contains = ["Mongoose"]
+
+[rule.output]
+device_type = "EnergySolar"
+device_name = "Solar Inverter Datalogger"
+model = "Solar PV Inverter Wi-Fi Stick"
+notes = "Solar PV telemetry and monitoring datalogger"
+
+[[rule]]
+id = "solar_inverter_hostname"
+description = "Solar inverter / datalogger matched by hostname"
+priority = 88
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["e-linter", "inverter", "solar"]
+
+[rule.output]
+device_type = "EnergySolar"
+device_name = "Solar Inverter Datalogger"
+model = "Solar PV Inverter Wi-Fi Stick"
+notes = "Solar PV telemetry and monitoring datalogger"
+
+# ==============================================================================
+# 10. Smart Home Kitchen & Cleaning Appliances
+# ==============================================================================
+
+[[rule]]
+id = "bosch_smart_oven"
+description = "Bosch Home Connect smart oven"
+priority = 100
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["oven", "hbg"]
+
+[rule.output]
+device_type = "Appliance"
+device_name = "Bosch Smart Oven"
+model = "Bosch Oven (Home Connect)"
+notes = "Smart kitchen appliance integrated with Home Connect"
+
+[[rule]]
+id = "bosch_smart_dishwasher"
+description = "Bosch Home Connect smart dishwasher"
+priority = 100
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["dishwasher"]
+
+[rule.output]
+device_type = "Appliance"
+device_name = "Bosch Smart Dishwasher"
+model = "Bosch Dishwasher (Home Connect)"
+notes = "Smart kitchen appliance integrated with Home Connect"
+
+[[rule]]
+id = "bosch_home_connect_generic"
+description = "Generic Bosch Home Connect appliance"
+priority = 85
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["bosch"]
+
+[rule.output]
+device_type = "Appliance"
+device_name = "Bosch Smart Home Appliance"
+model = "Bosch Home Connect Appliance"
+notes = "Smart kitchen appliance integrated with Home Connect"
+
+[[rule]]
+id = "irobot_roomba_host"
+description = "iRobot Roomba robotic vacuum by hostname"
+priority = 100
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["roomba"]
+
+[rule.output]
+device_type = "Appliance"
+device_name = "iRobot Roomba Vacuum"
+model = "iRobot Roomba Robotic Vacuum"
+notes = "Automated robotic vacuum cleaner"
+
+[[rule]]
+id = "irobot_roomba_vendor"
+description = "iRobot Roomba robotic vacuum by OUI vendor"
+priority = 95
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["irobot"]
+
+[rule.output]
+device_type = "Appliance"
+device_name = "iRobot Roomba Vacuum"
+model = "iRobot Roomba Robotic Vacuum"
+notes = "Automated robotic vacuum cleaner"
+
+# ==============================================================================
+# 11. Multimedia, Audio & Gaming
+# ==============================================================================
+
+[[rule]]
+id = "yamaha_musiccast_http"
+description = "Yamaha MusicCast Soundbar identified via Network_Module HTTP Server header"
+priority = 100
+conclusive = true
+requires_scanners = ["http"]
+
+[rule.match]
+http_server = { regex = "Network_Module/[0-9.]+\\s*\\(([A-Za-z0-9_-]+)\\)" }
+
+[[rule.extract]]
+source = "http_server"
+pattern = "Network_Module/[0-9.]+\\s*\\(([A-Za-z0-9_-]+)\\)"
+target = "yamaha.model"
+
+[rule.output]
+device_type = "Entertainment"
+device_name = "Yamaha Soundbar"
+model = "Yamaha {yamaha.model} (MusicCast)"
+notes = "Living room TV sound projector with AirPlay and Spotify"
+
+[[rule]]
+id = "yamaha_audio_hostname"
+description = "Yamaha MusicCast audio system by hostname"
+priority = 85
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["yamaha"]
+
+[rule.output]
+device_type = "Entertainment"
+device_name = "Yamaha Audio System"
+model = "Yamaha MusicCast Receiver / Speaker"
+
+[[rule]]
+id = "sony_ps5_vendor"
+description = "Sony PlayStation 5 via Sony Interactive Entertainment OUI"
+priority = 100
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["sony interactive"]
+
+[rule.output]
+device_type = "Entertainment"
+device_name = "Sony PlayStation 5"
+model = "Sony PlayStation 5"
+notes = "Gaming console and multimedia entertainment station"
+
+[[rule]]
+id = "sony_ps5_hostname"
+description = "Sony PlayStation 5 by hostname"
+priority = 99
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["ps5", "playstation"]
+
+[rule.output]
+device_type = "Entertainment"
+device_name = "Sony PlayStation 5"
+model = "Sony PlayStation 5"
+notes = "Gaming console and multimedia entertainment station"
+
+# ==============================================================================
+# 12. Servers, Workstations & Mobile Devices
+# ==============================================================================
+
+[[rule]]
+id = "raspberry_pi_vendor"
+description = "Raspberry Pi single-board server via OUI vendor"
+priority = 100
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["raspberry"]
+
+[rule.output]
+device_type = "Server"
+device_name = "Raspberry Pi Server"
+model = "Raspberry Pi Single Board Computer"
+notes = "Local Linux server host"
+
+[[rule]]
+id = "raspberry_pi_hostname"
+description = "Raspberry Pi single-board server via hostname"
+priority = 98
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["rpi"]
+
+[rule.output]
+device_type = "Server"
+device_name = "Raspberry Pi Server"
+model = "Raspberry Pi Single Board Computer"
+notes = "Local Linux server host"
+
+[[rule]]
+id = "linux_prometheus_server"
+description = "Linux server with SSH and Prometheus Node Exporter"
+priority = 95
+conclusive = true
+requires_scanners = ["ports_fast", "http"]
+
+[rule.match]
+ports_all = [22]
+http_endpoint = { port = 9100, path = "/metrics", contains = ["node_os_info", "node_uname_info"] }
+
+[rule.output]
+device_type = "Server"
+device_name = "Linux Host (Prometheus Node Exporter)"
+notes = "Server host with SSH and node telemetry exporter"
+
+[[rule]]
+id = "apple_iphone"
+description = "Apple iPhone mobile device"
+priority = 100
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["iphone"]
+
+[rule.output]
+device_type = "Mobile"
+device_name = "Apple iPhone"
+model = "Apple iPhone (iOS)"
+
+[[rule]]
+id = "apple_ipad"
+description = "Apple iPad tablet"
+priority = 100
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["ipad"]
+
+[rule.output]
+device_type = "Mobile"
+device_name = "Apple iPad"
+model = "Apple iPad (iPadOS)"
+
+[[rule]]
+id = "apple_mac_workstation"
+description = "Apple Mac workstation"
+priority = 85
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+vendor_contains = ["apple"]
+
+[rule.output]
+device_type = "Workstation"
+device_name = "Apple Mac"
+model = "Apple Mac (macOS Workstation)"
+notes = "Workstation computer connected to LAN"
+
+[[rule]]
+id = "google_pixel_watch"
+description = "Google Pixel Watch wearable"
+priority = 98
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["pixel-watch"]
+
+[rule.output]
+device_type = "Mobile"
+device_name = "Google Pixel Watch"
+model = "Google Pixel Watch (Wear OS)"
+notes = "Smartwatch wearable connected via Wi-Fi"
+
+[[rule]]
+id = "android_smartphone"
+description = "Android / Pixel smartphone"
+priority = 95
+conclusive = true
+requires_scanners = ["arp_oui_rdns"]
+
+[rule.match]
+hostname_contains = ["pixel", "android"]
+
+[rule.output]
+device_type = "Mobile"
+device_name = "Android Smartphone"
+model = "Android Mobile Device"
+notes = "Personal mobile smartphone connected via Wi-Fi"
+
+[[rule]]
+id = "ssh_workstation"
+description = "Generic Linux/Unix workstation with active SSH service"
+priority = 50
+conclusive = true
+requires_scanners = ["ports_fast"]
+
+[rule.match]
+ports_all = [22]
+hostname_not_empty = true
+
+[rule.output]
+device_type = "Workstation"
+device_name = "Workstation ({hostname})"
+notes = "Linux / Unix workstation with active SSH service"
+
+# ==============================================================================
+# 13. Non-Conclusive Best-Guess Fallbacks (never short-circuit early)
+# ==============================================================================
+
+[[rule]]
+id = "gateway_fallback"
+description = "Generic default gateway / router fallback"
+priority = 30
+conclusive = false
+
+[rule.match]
+is_gateway = true
+
+[rule.output]
+device_type = "Router"
+device_name = "{vendor|Network} Gateway / Router"
+notes = "Default gateway routing traffic for the subnet"
+
+[[rule]]
+id = "http_title_fallback"
+description = "Fallback using short HTTP page title"
+priority = 25
+conclusive = false
+
+[rule.match]
+http_title = { regex = "^.{1,39}$" }
+
+[rule.output]
+device_type = "Unknown"
+device_name = "{http.title}"
+
+[[rule]]
+id = "hostname_fallback"
+description = "Fallback using resolved local hostname"
+priority = 15
+conclusive = false
+
+[rule.match]
+hostname_not_empty = true
+
+[rule.output]
+device_type = "Unknown"
+device_name = "{hostname}"
+
+[[rule]]
+id = "vendor_fallback"
+description = "Fallback using MAC OUI vendor name"
+priority = 10
+conclusive = false
+
+[rule.match]
+vendor = { regex = ".+" }
+
+[rule.output]
+device_type = "Unknown"
+device_name = "{vendor} Device"
